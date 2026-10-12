@@ -8,6 +8,7 @@ import { Transport } from './transport.js';
 import { sourceHarmony } from './yamaha.js';
 import { assetUrl } from './assets.js';
 import { clearSavedSounds, downloadSounds, readSavedSounds, saveSounds, validateStarter } from './soundfont-cache.js';
+import { folderPermission, forgetStyleFolder, readStyleEntry, readStyleFolder, saveStyleFolder, scanStyleFolder, stylesFromFiles } from './style-folder.js';
 
 const icons = {
   play: '<path d="m8 5 11 7-11 7Z"/>',
@@ -66,6 +67,8 @@ document.querySelector('#app').innerHTML = `
     <p>Select a style to hear a four-bar C - G - Am - F preview with all parts. Load it when you are ready to practice. Importing a style or restoring the demo also previews it.</p>
     <label>Style library <select id="library-style" aria-label="Local style"><option value="">Choose a local style…</option></select></label>
     <button id="load-style" class="small-button" disabled>Load style</button>
+    <div class="drawer-actions"><button id="open-style-folder" class="small-button">Open style folder</button><button id="restore-style-folder" class="small-button" hidden>Open remembered folder</button><button id="forget-style-folder" class="small-button" hidden>Forget folder</button><input id="style-folder-files" type="file" webkitdirectory multiple hidden></div>
+    <p id="folder-status" role="status">Choose an extracted style collection. Files stay on your device; supported folders can be remembered in this browser.</p>
     <p id="library-status">Loading local library…</p>
     <div class="drawer-actions"><label class="upload-button">${icon('upload')} Import style<input id="style-file" type="file" accept=".mid,.midi,.sty,.prs,.sst" class="file-input"></label><button id="demo" class="small-button" title="Restore the built-in demo">Restore demo</button></div>
     <p>Looking for styles? Visit <a href="https://www.jjazzlab.org/en/resources/" target="_blank" rel="noopener noreferrer">JJazzLab's style resources</a>. Check the source's terms, download and extract files on your device, then import an individual .sty, .prs or .sst here. Style Trainer does not distribute or automatically download that collection.</p>
@@ -121,6 +124,10 @@ let busy = false;
 let startRequest = 0;
 let soundfontName = 'JJazzLab SoundFont';
 let library = { styles: [], soundfonts: [] };
+let styleEntries = [];
+let folderEntries = [];
+let rememberedFolder = null;
+let folderRequest = 0;
 let localFontUrl = '/soundfonts/default.sf2';
 let libraryReady;
 let pendingMode = null;
@@ -451,7 +458,7 @@ function updateTransport() {
   $('solo').disabled = busy || mode !== 'stop';
   $('restore-chords').disabled = busy || mode !== 'stop' || randomizedHarmony === null;
   $('transport-caption').textContent = { stop: 'Start with a little listening.', play: 'Get to know the groove.', step: 'Take it one shape at a time.', record: 'You have the lead now.' }[mode];
-  for (const id of ['focus', 'bars', 'section', 'bpm', 'style-file', 'demo', 'sf-file', 'preview', 'practice-bar', 'practice-speed', 'library-style', 'load-local-font', 'click', 'click-sound', 'harmony-key', 'randomize-chords']) $(id).disabled = busy || mode !== 'stop';
+  for (const id of ['focus', 'bars', 'section', 'bpm', 'style-file', 'demo', 'sf-file', 'preview', 'practice-bar', 'practice-speed', 'library-style', 'load-local-font', 'click', 'click-sound', 'harmony-key', 'randomize-chords', 'open-style-folder', 'restore-style-folder', 'forget-style-folder', 'style-folder-files']) $(id).disabled = busy || mode !== 'stop';
   $('load-style').disabled = busy || mode !== 'stop' || !$('library-style').value;
   $('test-led').disabled = busy || mode !== 'stop';
   $('connect-midi').disabled = busy;
@@ -703,6 +710,137 @@ function resumePendingMode() {
   }
 }
 
+function renderStyleLibrary() {
+  styleEntries = [...library.styles.map(entry => ({ ...entry, url: assetUrl(entry.url) })), ...folderEntries];
+  const groups = new Map();
+  styleEntries.forEach((entry, index) => {
+    if (!groups.has(entry.category)) {
+      const group = document.createElement('optgroup');
+      group.label = entry.category;
+      groups.set(entry.category, group);
+    }
+    groups.get(entry.category).append(new Option(entry.name, String(index)));
+  });
+  $('library-style').replaceChildren(new Option('Choose a style…', ''), ...groups.values());
+  $('library-style').closest('label').hidden = styleEntries.length === 0;
+  $('load-style').hidden = styleEntries.length === 0;
+  updateTransport();
+}
+
+async function useStyleFolder(handle, remember) {
+  const entries = await scanStyleFolder(handle);
+  if (!entries.length) throw new Error('No supported styles found in this folder. Choose a folder containing .sty, .prs, .sst, .mid or .midi files.');
+  folderEntries = entries;
+  renderStyleLibrary();
+  rememberedFolder = handle;
+  $('restore-style-folder').hidden = false;
+  $('forget-style-folder').hidden = false;
+  let warning = '';
+  if (remember) {
+    try { await saveStyleFolder(handle); }
+    catch (error) {
+      console.warn(error);
+      warning = ` Folder is usable now, but could not be remembered: ${error.message}. Select it again next visit.`;
+    }
+  }
+  $('folder-status').textContent = `${handle.name} · ${entries.length} styles, grouped by subfolder.${warning || ' Folder access is remembered locally; browser permission may be needed next visit.'}`;
+  notify(warning || `Folder ready: ${entries.length} styles. Select one to preview, then Load style to practice.`, Boolean(warning));
+}
+
+async function restoreFolderOnVisit() {
+  const request = folderRequest;
+  if (!window.showDirectoryPicker) {
+    $('folder-status').textContent = 'Open style folder imports a collection for this session. Remembered folder access requires desktop Chrome or Edge.';
+    return;
+  }
+  try {
+    const handle = await readStyleFolder();
+    if (request !== folderRequest) return;
+    if (!handle) return;
+    rememberedFolder = handle;
+    $('restore-style-folder').hidden = false;
+    $('forget-style-folder').hidden = false;
+    $('folder-status').textContent = `Remembered folder: ${handle.name}. Click Open remembered folder to restore access.`;
+    // Automatic restore must not prompt for permission or interrupt a user selection.
+    if (await folderPermission(handle) && request === folderRequest) {
+      const entries = await scanStyleFolder(handle);
+      if (request !== folderRequest) return;
+      folderEntries = entries;
+      renderStyleLibrary();
+      $('folder-status').textContent = `${handle.name} · ${entries.length} styles restored. Select a style to preview.`;
+    }
+  } catch (error) {
+    if (request !== folderRequest) return;
+    console.warn(error);
+    $('folder-status').textContent = `Could not restore the style folder: ${error.message}. Use Open style folder to select it again.`;
+  }
+}
+
+$('open-style-folder').addEventListener('click', async () => {
+  if (busy || transport.mode !== 'stop') return;
+  folderRequest++;
+  stopAudition();
+  if (!window.showDirectoryPicker) { $('style-folder-files').click(); return; }
+  busy = true;
+  updateTransport();
+  try {
+    const handle = await window.showDirectoryPicker({ id: 'style-library', mode: 'read' });
+    await libraryReady;
+    await useStyleFolder(handle, true);
+  } catch (error) {
+    if (error.name === 'AbortError') notify('Folder selection cancelled. Your library is unchanged.');
+    else {
+      $('folder-status').textContent = `Folder could not be opened: ${error.message}. Select it again or check folder permissions.`;
+      reportError(error);
+    }
+  } finally { busy = false; updateTransport(); }
+});
+$('restore-style-folder').addEventListener('click', async () => {
+  if (busy || transport.mode !== 'stop' || !rememberedFolder) return;
+  folderRequest++;
+  stopAudition();
+  busy = true;
+  updateTransport();
+  try {
+    if (!await folderPermission(rememberedFolder, true)) throw new Error('Read access was not granted. Retry Open remembered folder or select another folder.');
+    await useStyleFolder(rememberedFolder, false);
+  } catch (error) {
+    $('folder-status').textContent = `Remembered folder is unavailable: ${error.message}`;
+    reportError(error);
+  } finally { busy = false; updateTransport(); }
+});
+$('forget-style-folder').addEventListener('click', async () => {
+  if (busy || transport.mode !== 'stop') return;
+  folderRequest++;
+  stopAudition();
+  busy = true;
+  updateTransport();
+  try {
+    await forgetStyleFolder();
+    rememberedFolder = null;
+    folderEntries = [];
+    renderStyleLibrary();
+    $('restore-style-folder').hidden = true;
+    $('forget-style-folder').hidden = true;
+    $('folder-status').textContent = 'Folder forgotten. No files were deleted; your loaded exercise is unchanged.';
+    notify('Remembered folder removed from this browser.');
+  } catch (error) { reportError(error); }
+  finally { busy = false; updateTransport(); }
+});
+$('style-folder-files').addEventListener('change', async event => {
+  if (!event.target.files.length) return;
+  stopAudition();
+  folderRequest++;
+  await libraryReady;
+  const entries = stylesFromFiles(event.target.files);
+  event.target.value = '';
+  if (!entries.length) { notify('No supported styles found. Choose a folder containing .sty, .prs, .sst, .mid or .midi files.', true); return; }
+  folderEntries = entries;
+  renderStyleLibrary();
+  $('folder-status').textContent = `${entries.length} styles available for this session only. This browser cannot remember folder access; select the folder again next visit.`;
+  notify('Folder imported locally. Select a style to preview, then Load style to practice.');
+});
+
 async function loadLibrary() {
   try {
     const response = await fetch(assetUrl('library.json'));
@@ -716,21 +854,10 @@ async function loadLibrary() {
     catalog.soundfonts.forEach(font => assetUrl(font.url));
     catalog.styles.forEach(entry => assetUrl(entry.url));
     library = catalog;
-    const groups = new Map();
-    library.styles.forEach((entry, index) => {
-      if (!groups.has(entry.category)) {
-        const group = document.createElement('optgroup');
-        group.label = entry.category;
-        groups.set(entry.category, group);
-      }
-      groups.get(entry.category).append(new Option(entry.name, index));
-    });
-    $('library-style').replaceChildren(new Option('Choose a local style…', ''), ...groups.values());
+    renderStyleLibrary();
     if (library.soundfonts.length) localFontUrl = library.soundfonts[0].url;
     const publicEdition = library.edition === 'public';
     $('library-status').textContent = publicEdition ? 'Built-in demo ready. Import your own .sty or MIDI file; no private Yamaha styles are distributed.' : `${library.styles.length} local styles · grouped by category`;
-    $('library-style').closest('label').hidden = publicEdition;
-    $('load-style').hidden = publicEdition;
     $('starter-setup').hidden = !publicEdition;
     if (publicEdition) {
       soundfontName = 'GeneralUser GS (not loaded)';
@@ -896,24 +1023,22 @@ $('library-style').addEventListener('change', async () => {
   updateTransport();
   if (!$('library-style').value) return;
   const request = auditionRequest;
-  const entry = library.styles[Number($('library-style').value)];
+  const entry = styleEntries[Number($('library-style').value)];
   try {
-    const response = await fetch(assetUrl(entry.url));
-    if (!response.ok) throw new Error(`Style could not be loaded (HTTP ${response.status}): ${entry.name}`);
-    const next = parseMidi(await response.arrayBuffer(), `${entry.name}.sty`);
+    const data = await readStyleEntry(entry);
+    const next = parseMidi(data.buffer, data.name);
     if (request === auditionRequest) await auditionStyle(next, request);
   } catch (error) { if (request === auditionRequest) reportError(error); }
 });
 $('load-style').addEventListener('click', async () => {
-  const entry = library.styles[Number($('library-style').value)];
+  const entry = styleEntries[Number($('library-style').value)];
   if (!entry || busy || transport.mode !== 'stop') return;
   stopAudition();
   busy = true;
   updateTransport();
   try {
-    const response = await fetch(assetUrl(entry.url));
-    if (!response.ok) throw new Error(`Style could not be loaded (HTTP ${response.status}): ${entry.name}`);
-    const next = parseMidi(await response.arrayBuffer(), `${entry.name}.sty`);
+    const data = await readStyleEntry(entry);
+    const next = parseMidi(data.buffer, data.name);
     buildExercise(next);
     setStyle(next);
     notify(`Loaded ${entry.category} / ${entry.name}. Select a practice track and section.`);
@@ -1165,5 +1290,6 @@ function animate() {
 }
 setStyle(style);
 libraryReady = loadLibrary();
+void libraryReady.then(restoreFolderOnVisit);
 updateDevices();
 animate();

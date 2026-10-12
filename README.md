@@ -19,8 +19,24 @@ The public edition is designed for
    copy without stopping already loaded sounds.
 4. Alternatively, select an existing licensed `.sf2` from Downloads using
    **Load .sf2**, or explicitly enable **Preview synth** (not GM-quality).
-5. **Change style → Import style** loads your own MIDI/Yamaha style. Copied
-   private Yamaha styles are not included in the public edition.
+5. **Change style → Open style folder** lists your extracted collection,
+   grouped by subfolder, with preview on selection and **Load style** to practice.
+   **Import style** still loads a single file. Copied private Yamaha styles
+   are not included in the public edition.
+
+On desktop Chrome/Edge, folder browsing requests **read-only** access to the
+folder you explicitly choose. The app remembers a folder handle in local
+IndexedDB storage (not cookies or uploaded file contents). On later visits
+the list returns if permission remains granted; otherwise click **Open
+remembered folder** and approve access. **Forget folder** removes the stored
+reference and folder list, without deleting files or changing the loaded
+exercise. Moving/deleting the folder or clearing browser storage can require
+selecting it again. Other browsers use a session-only folder import.
+
+A single imported file does not expose its parent directory or allow the
+app to discover sibling files. Choose the collection folder explicitly.
+Supported files are `.sty`, `.prs`, `.sst`, `.mid` and `.midi`; subfolders are
+included and file contents are read only when previewing/loading a style.
 
 The style drawer links to [JJazzLab's resources](https://www.jjazzlab.org/en/resources/).
 Its user-style ZIP is described as free to download, but no redistribution
@@ -33,7 +49,8 @@ still work for the current session without saved bytes. Browser storage can be
 cleared or evicted and is not shared between browsers/devices. The app does not
 silently install files under a user folder, upload imported files, or promise
 offline application operation. Only the hosted starter bank is cached;
-uploaded styles and SoundFonts are not persisted.
+uploaded styles and SoundFonts are not copied into storage. Remembered folder
+handles allow styles to be read again from the chosen directory with permission.
 
 Use current desktop Chrome or Edge for Web MIDI and a connected controller.
 GitHub Pages provides HTTPS; MIDI permission and a user gesture for audio are

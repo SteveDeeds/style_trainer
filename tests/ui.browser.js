@@ -3,6 +3,98 @@ import { createDemo } from '../src/midi.js';
 import { buildExercise, styleTracks } from '../src/training.js';
 import { clearSavedSounds, readSavedSounds, saveSounds, validateStarter } from '../src/soundfont-cache.js';
 import { AudioEngine } from '../src/audio.js';
+import { forgetStyleFolder, readStyleFolder, saveStyleFolder } from '../src/style-folder.js';
+
+export async function verifyStyleFolderUI() {
+  const $ = id => document.getElementById(id);
+  const until = async predicate => {
+    const limit = performance.now() + 10000;
+    while (!predicate()) {
+      if (performance.now() > limit) throw new Error('Folder UI check timed out.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(message);
+    checks.push(message);
+  };
+  const previous = await readStyleFolder();
+  const picker = window.showDirectoryPicker;
+  const root = await navigator.storage.getDirectory();
+  const folder = await root.getDirectoryHandle('style-trainer-browser-test', { create: true });
+  try {
+    const pop = await folder.getDirectoryHandle('Pop', { create: true });
+    const file = await pop.getFileHandle('FolderTest.mid', { create: true });
+    const writer = await file.createWritable();
+    await writer.write(new Uint8Array([
+      77, 84, 104, 100, 0, 0, 0, 6, 0, 0, 0, 1, 1, 224,
+      77, 84, 114, 107, 0, 0, 0, 13,
+      0, 144, 60, 100, 131, 96, 128, 60, 0, 0, 255, 47, 0,
+    ]));
+    await writer.close();
+    window.showDirectoryPicker = async options => {
+      check(options.mode === 'read', 'Folder picker requests read-only access');
+      return folder;
+    };
+    $('open-devices').click();
+    $('preview').checked = true;
+    $('preview').dispatchEvent(new Event('change'));
+    $('devices-dialog').close();
+    $('open-style').click();
+    $('open-style-folder').click();
+    await until(() => $('folder-status').textContent.includes('1 styles'));
+    const stored = await readStyleFolder();
+    check(await stored.isSameEntry(folder), 'Folder handle survives IndexedDB structured cloning');
+    const option = [...$('library-style').options].find(option => option.textContent === 'FolderTest');
+    check(option?.parentElement.label === 'Folder · Pop', 'Folder entries appear grouped by subfolder');
+    const before = $('style-name').textContent;
+    $('library-style').value = option.value;
+    $('library-style').dispatchEvent(new Event('change'));
+    await until(() => $('notice').textContent.includes('Previewing FolderTest'));
+    check($('style-name').textContent === before, 'Folder selection previews without replacing the practice style');
+    $('load-style').click();
+    await until(() => $('style-name').textContent === 'FolderTest');
+    check($('stop').getAttribute('aria-pressed') === 'true', 'Loading a folder style leaves practice stopped');
+    $('forget-style-folder').click();
+    await until(() => $('folder-status').textContent.includes('Folder forgotten'));
+    check(!await readStyleFolder(), 'Forget removes the persisted handle');
+    check($('style-name').textContent === 'FolderTest', 'Forget preserves the loaded exercise');
+    check(![...$('library-style').options].some(option => option.textContent === 'FolderTest'), 'Forget removes folder library entries');
+    check(await pop.getFileHandle('FolderTest.mid'), 'Forget does not delete local files');
+    window.showDirectoryPicker = async () => { throw new DOMException('Cancelled', 'AbortError'); };
+    $('open-style-folder').click();
+    await until(() => $('notice').textContent.includes('Folder selection cancelled'));
+    check($('style-name').textContent === 'FolderTest', 'Cancelled picker preserves the exercise');
+    window.showDirectoryPicker = async () => folder;
+    const open = indexedDB.open;
+    indexedDB.open = () => { throw new DOMException('Storage denied', 'SecurityError'); };
+    try {
+      $('open-style-folder').click();
+      await until(() => $('folder-status').textContent.includes('could not be remembered'));
+      check([...$('library-style').options].some(option => option.textContent === 'FolderTest'), 'Storage failure leaves the folder browsable for this session');
+      check($('notice').getAttribute('role') === 'alert', 'Storage failure is explicitly reported');
+    } finally { indexedDB.open = open; }
+    $('forget-style-folder').click();
+    await until(() => $('folder-status').textContent.includes('Folder forgotten'));
+    window.showDirectoryPicker = undefined;
+    const files = new DataTransfer();
+    files.items.add(await file.getFile());
+    $('style-folder-files').files = files.files;
+    $('style-folder-files').dispatchEvent(new Event('change'));
+    await until(() => $('folder-status').textContent.includes('session only'));
+    check([...$('library-style').options].some(option => option.textContent === 'FolderTest'), 'Session-only folder fallback populates the same library');
+    check(!await readStyleFolder(), 'Session-only fallback does not claim to persist files');
+    $('style-dialog').close();
+    return checks;
+  } finally {
+    $('stop').click();
+    window.showDirectoryPicker = picker;
+    if (previous) await saveStyleFolder(previous);
+    else await forgetStyleFolder();
+    await root.removeEntry('style-trainer-browser-test', { recursive: true });
+  }
+}
 
 // Run on a fresh dev page; captures audio calls without needing MIDI hardware.
 export async function verifyPreviews() {
