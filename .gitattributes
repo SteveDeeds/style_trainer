@@ -1,0 +1,4 @@
+# Preserve checksummed publication assets byte-for-byte on every platform.
+public-release/synth/*.js -text
+public-release/soundfonts/generaluser-gs.sf2 -text
+public-release/licenses/source/*.zip -text
