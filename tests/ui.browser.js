@@ -2,6 +2,82 @@ import { Notation } from '../src/notation.js';
 import { createDemo } from '../src/midi.js';
 import { buildExercise, styleTracks } from '../src/training.js';
 import { clearSavedSounds, readSavedSounds, saveSounds, validateStarter } from '../src/soundfont-cache.js';
+import { AudioEngine } from '../src/audio.js';
+
+// Run on a fresh dev page; captures audio calls without needing MIDI hardware.
+export async function verifyPreviews() {
+  const $ = id => document.getElementById(id);
+  const waitFor = async predicate => {
+    const until = performance.now() + 15000;
+    while (!predicate()) {
+      if (performance.now() > until) throw new Error('Preview check timed out.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(message);
+    checks.push(message);
+  };
+  const on = AudioEngine.prototype.on;
+  const off = AudioEngine.prototype.off;
+  const played = [];
+  const released = [];
+  AudioEngine.prototype.on = function(note) { played.push(note); };
+  AudioEngine.prototype.off = function(note) { released.push(note); };
+  try {
+    $('open-devices').click();
+    $('preview').checked = true;
+    $('preview').dispatchEvent(new Event('change'));
+    $('devices-dialog').close();
+    const before = $('notation').querySelector('svg').getAttribute('aria-label');
+    $('open-style').click();
+    $('demo').click();
+    await waitFor(() => played.length > 0);
+    check($('notice').textContent.includes('C → G → Am → F'), 'Style preview uses the requested pop progression');
+    check($('stop').getAttribute('aria-pressed') === 'true', 'Style preview does not start practice transport');
+    check($('notation').querySelector('svg').getAttribute('aria-label') === before, 'Style preview preserves exercise harmony');
+    await waitFor(() => $('notice').textContent.startsWith('Preview ended:'));
+    const completed = played.length;
+    await new Promise(resolve => setTimeout(resolve, 300));
+    check(played.length === completed, 'Style preview ends after four bars instead of looping');
+    $('demo').click();
+    await waitFor(() => played.length > completed);
+    $('style-dialog').close();
+    const count = played.length;
+    await new Promise(resolve => setTimeout(resolve, 300));
+    check(played.length === count && released.length > 0, 'Closing the style menu releases and cancels preview notes');
+    played.length = 0;
+    const head = $('notation').querySelector('.vf-notehead[role="button"]');
+    const pitch = Number(head.getAttribute('aria-label').split(' ').at(-1));
+    head.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await waitFor(() => played.length > 0);
+    check(played[0].pitch === pitch && played[0].part === undefined && played[0].channel === 15, 'Click auditions the sounding bass pitch rather than its octave-up written pitch');
+    check($('stop').getAttribute('aria-pressed') === 'true', 'Clicking notation does not start or score practice');
+    played.length = 0;
+    head.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await waitFor(() => played.length > 0);
+    check(played[0].pitch === pitch, 'Keyboard activation auditions the same note');
+    $('stop').click();
+    for (const part of ['Piano', 'Drums']) {
+      const option = [...$('focus').options].find(option => option.textContent.startsWith(part));
+      $('focus').value = option.value;
+      $('focus').dispatchEvent(new Event('change'));
+      played.length = 0;
+      const note = $('notation').querySelector('.vf-notehead[role="button"]');
+      note.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await waitFor(() => played.length > 0);
+      check(played.length === 1, `${part} notehead plays one note, not the entire chord or beat`);
+      check(played[0].channel === (part === 'Drums' ? 9 : 15), `${part} audition uses the correct melodic/percussion channel`);
+      $('stop').click();
+    }
+    return checks;
+  } finally {
+    $('stop').click();
+    AudioEngine.prototype.on = on;
+    AudioEngine.prototype.off = off;
+  }
+}
 
 // Use a disposable browser profile: this deliberately replaces its starter cache.
 export async function verifySavedSounds() {

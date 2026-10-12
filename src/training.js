@@ -207,6 +207,17 @@ export function buildExercise(style, { section = 0, bars = 4, focus = 'full', le
   };
 }
 
+export function buildStylePreview(style) {
+  const section = Math.max(0, style.sections.findIndex(section => /^Main A$/i.test(section.name)));
+  const harmony = [
+    { root: 0, name: 'C', intervals: [0, 2, 4, 5, 7, 9, 11] },
+    { root: 7, name: 'G', intervals: [0, 2, 4, 5, 7, 9, 10] },
+    { root: 9, name: 'Am', minor: true, intervals: [0, 2, 3, 5, 7, 8, 10] },
+    { root: 5, name: 'F', intervals: [0, 2, 4, 6, 7, 9, 11] },
+  ];
+  return buildExercise(style, { section, bars: 4, focus: 'full', level: 4, harmony });
+}
+
 export function groupNotes(notes) {
   const groups = new Map();
   for (const note of notes) {

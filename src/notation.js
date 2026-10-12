@@ -148,7 +148,7 @@ export function prepareNotationBars(exercise, definitions, key) {
 }
 
 export class Notation {
-  constructor(element) { this.element = element; }
+  constructor(element, onAudition = null) { this.element = element; this.onAudition = onAudition; }
   render(exercise, key) {
     this.element.replaceChildren();
     this.element.scrollTop = 0;
@@ -249,12 +249,31 @@ export class Notation {
     this.context = context;
     this.exercise = exercise;
     this.key = key;
+    if (this.onAudition) for (const entry of this.feedbackEntries) {
+      const heads = entry.note.getSVGElement()?.querySelectorAll('.vf-notehead') ?? [];
+      heads.forEach((head, index) => {
+        const source = entry.sources.find(source => writtenPitch(source) === entry.pitches[index]);
+        if (!source) return;
+        head.style.cursor = 'pointer';
+        head.setAttribute('role', 'button');
+        head.setAttribute('tabindex', '0');
+        head.setAttribute('aria-label', `Play MIDI note ${source.pitch}`);
+        head.addEventListener('click', () => this.onAudition(source));
+        head.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            this.onAudition(source);
+          }
+        });
+      });
+    }
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', `${exercise.bars} bars of target notation, ${exercise.meter.numerator}/${exercise.meter.denominator}. Chords: ${exercise.chords.filter(Boolean).join(', ')}.${hasBass ? ' Bass guitar is written one octave higher; the bass clef 8 below indicates sounding one octave lower.' : ''}`);
     this.cursor = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     this.cursor.setAttribute('width', '3');
     this.cursor.setAttribute('fill', '#00a88d');
     this.cursor.setAttribute('opacity', '.75');
+    this.cursor.style.pointerEvents = 'none';
     svg.append(this.cursor);
     this.update(0);
   }

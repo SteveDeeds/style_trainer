@@ -1,6 +1,6 @@
 import './style.css';
 import { createDemo, parseMidi } from './midi.js';
-import { buildExercise, LAYERS, partOf, pitchName, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
+import { buildExercise, buildStylePreview, LAYERS, partOf, pitchName, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
 import { AudioEngine, monitorNote } from './audio.js';
 import { MidiController } from './controller.js';
 import { Notation } from './notation.js';
@@ -63,7 +63,7 @@ document.querySelector('#app').innerHTML = `
   <dialog id="style-dialog" class="setup-drawer" aria-labelledby="style-dialog-title">
     <div class="dialog-heading"><h2 id="style-dialog-title">Choose your style</h2><button data-close="style-dialog" aria-label="Close style library">×</button></div>
     <p class="drawer-notice" data-notice role="status"></p>
-    <p>Choose a local arrangement, then load it when you are ready.</p>
+    <p>Select a style to hear a four-bar C - G - Am - F preview with all parts. Load it when you are ready to practice. Importing a style or restoring the demo also previews it.</p>
     <label>Style library <select id="library-style" aria-label="Local style"><option value="">Choose a local style…</option></select></label>
     <button id="load-style" class="small-button" disabled>Load style</button>
     <p id="library-status">Loading local library…</p>
@@ -147,7 +147,80 @@ const notify = (message, error = false) => {
 };
 const reportError = error => { console.error(error); notify(error.message || String(error), true); };
 const controller = new MidiController(handleInput, updateDevices, reportError);
-const notation = new Notation($('notation'));
+const notation = new Notation($('notation'), note => void auditionNote(note));
+let auditionRequest = 0;
+let auditionTimer = null;
+let previewName = null;
+const auditionNotes = new Set();
+const previewTransport = new Transport({
+  noteOn: note => { auditionNotes.add(note); audio.on(note); },
+  noteOff: note => { audio.off(note); auditionNotes.delete(note); },
+  silence: () => {
+    clearTimeout(auditionTimer);
+    for (const note of auditionNotes) audio.off(note);
+    auditionNotes.clear();
+  },
+  guide: () => {},
+  onState: () => {
+    if (previewName && previewTransport.mode === 'stop') {
+      notify(`Preview ended: ${previewName}. Your practice settings are unchanged.`);
+      previewName = null;
+    }
+  },
+  onResult: () => {},
+  onLoop: () => {},
+  onError: reportError,
+});
+previewTransport.loop = false;
+previewTransport.clickEnabled = false;
+function stopAudition() {
+  auditionRequest++;
+  previewTransport.stop();
+}
+// Dialog close events can be deferred in inactive tabs.
+new MutationObserver(() => {
+  if (!$('style-dialog').open) stopAudition();
+}).observe($('style-dialog'), { attributes: true, attributeFilter: ['open'] });
+async function prepareAudition(request) {
+  await libraryReady;
+  if (request !== auditionRequest) return false;
+  if (library.edition === 'public' && audio.soundfont === null && !audio.preview && !savedStarterAvailable) {
+    showSoundSetup(null);
+    notify('Choose sounds first, then select the style or click the note again to preview it.');
+    return false;
+  }
+  if (busy) { notify('Sounds are loading. Try the preview again when loading finishes.'); return false; }
+  busy = true;
+  updateTransport();
+  try { await ensureAudio(); }
+  finally { busy = false; updateTransport(); }
+  return request === auditionRequest;
+}
+async function auditionStyle(next, request = null) {
+  if (request === null) { stopAudition(); request = auditionRequest; }
+  try {
+    if (transport.mode !== 'stop' || !$('style-dialog').open) return;
+    const preview = buildStylePreview(next);
+    if (!await prepareAudition(request) || !$('style-dialog').open) return;
+    const section = next.sections.find(section => /^Main A$/i.test(section.name)) ?? next.sections[0];
+    const bpm = next.tempos.filter(tempo => tempo.tick <= section.start).at(-1)?.bpm ?? 120;
+    previewTransport.start('play', preview, bpm);
+    previewName = next.name;
+    notify(`Previewing ${next.name}: C → G → Am → F, all parts, four bars once. Close this menu or press Stop to end the preview.`);
+  } catch (error) { if (request === auditionRequest) reportError(error); }
+}
+async function auditionNote(source) {
+  stopAudition();
+  const request = auditionRequest;
+  try {
+    if (!await prepareAudition(request)) return;
+    const note = monitorNote(source.pitch, source.velocity, source);
+    auditionNotes.add(note);
+    audio.on(note);
+    const seconds = source.duration / exercise.ppq * 60 / exercise.playbackBpm;
+    auditionTimer = setTimeout(() => { audio.off(note); auditionNotes.delete(note); }, Math.max(150, Math.min(1500, seconds * 1000)));
+  } catch (error) { if (request === auditionRequest) reportError(error); }
+}
 const transport = new Transport({
   noteOn: note => {
     audio.on(note);
@@ -264,6 +337,7 @@ function rebuild() {
   updateProgress();
 }
 function setStyle(next) {
+  stopAudition();
   style = next;
   randomizedHarmony = null;
   $('section').replaceChildren(...style.sections.map((s, i) => new Option(s.name, i)));
@@ -685,6 +759,7 @@ async function loadLibrary() {
 }
 async function start(mode) {
   if (busy) return;
+  stopAudition();
   if (!exercise.target.length) { notify('No target notes in this track at the current density. Select another track or section.', true); return; }
   const request = ++startRequest;
   try {
@@ -727,6 +802,7 @@ async function start(mode) {
 
 for (const mode of ['play', 'step', 'record']) $(mode).addEventListener('click', () => void start(mode));
 $('stop').addEventListener('click', () => {
+  stopAudition();
   startRequest++;
   pendingMode = null;
   soundLoad?.abort();
@@ -810,11 +886,28 @@ for (const id of ['practice-bar', 'practice-speed']) $(id).addEventListener('cha
       exercise.practiceOnly ? 'Practice drill selected. Scores are feedback only; return to the full pattern at normal tempo for level-up.' : 'Full pattern restored. Record three consecutive qualifying loops to advance.');
   } catch (error) { reportError(error); }
 });
-$('demo').addEventListener('click', () => { setStyle(createDemo()); notify('Demo restored. Welcome back to Midnight Pocket.'); });
-$('library-style').addEventListener('change', updateTransport);
+$('demo').addEventListener('click', () => {
+  setStyle(createDemo());
+  notify('Demo restored. Welcome back to Midnight Pocket.');
+  void auditionStyle(style);
+});
+$('library-style').addEventListener('change', async () => {
+  stopAudition();
+  updateTransport();
+  if (!$('library-style').value) return;
+  const request = auditionRequest;
+  const entry = library.styles[Number($('library-style').value)];
+  try {
+    const response = await fetch(assetUrl(entry.url));
+    if (!response.ok) throw new Error(`Style could not be loaded (HTTP ${response.status}): ${entry.name}`);
+    const next = parseMidi(await response.arrayBuffer(), `${entry.name}.sty`);
+    if (request === auditionRequest) await auditionStyle(next, request);
+  } catch (error) { if (request === auditionRequest) reportError(error); }
+});
 $('load-style').addEventListener('click', async () => {
   const entry = library.styles[Number($('library-style').value)];
   if (!entry || busy || transport.mode !== 'stop') return;
+  stopAudition();
   busy = true;
   updateTransport();
   try {
@@ -864,6 +957,7 @@ $('clear-sounds').addEventListener('click', async () => {
 $('style-file').addEventListener('change', async event => {
   const file = event.target.files[0];
   if (!file) return;
+  stopAudition();
   try {
     if (file.size > 32 * 1024 * 1024) throw new Error('Choose a MIDI/style file smaller than 32 MiB.');
     const next = parseMidi(await file.arrayBuffer(), file.name);
@@ -871,6 +965,7 @@ $('style-file').addEventListener('change', async event => {
     buildExercise(next);
     setStyle(next);
     notify(`Loaded ${file.name}. ${next.casm.length ? 'Yamaha source chords and transposition policies loaded' : 'MIDI arrangement with inferred chords'}; fixed practice tempo.`);
+    void auditionStyle(next);
   } catch (error) { reportError(error); }
   finally { event.target.value = ''; }
 });
@@ -968,6 +1063,7 @@ for (const [triggerId, dialogId] of [['open-style', 'style-dialog'], ['open-devi
     dialog.querySelector('[data-close]').focus();
   });
   dialog.addEventListener('close', () => {
+    if (dialogId === 'style-dialog') stopAudition();
     if (dialogId === 'devices-dialog') pendingMode = null;
     trigger.setAttribute('aria-expanded', 'false');
     if (!document.querySelector('.setup-drawer[open]') && !$('harmony-popover').matches(':popover-open')) trigger.focus();

@@ -45,6 +45,20 @@ not the instrument. With no identifiable instrument, monitoring defaults to
 GM acoustic piano. Connecting MIDI without sounds opens sound setup in the
 public edition; MIDI input alone cannot download audio without a user choice.
 
+In **Choose your style**, selecting a library entry auditions its Main A
+section once over four bars of **C - G - Am - F**, with all parts at full
+density. Importing a style or restoring the demo in that menu also auditions
+it. Library selection previews without replacing the exercise; **Load style**
+applies the selection. Closing the menu, selecting another style, starting
+practice, or pressing **Stop** ends the preview.
+
+Click a notation notehead (or focus it and press Enter/Space) to hear that
+individual note with its source instrument and sounding pitch. Bass notes
+sound one octave below their written pitch; drums retain their assigned
+sound. These auditions do not score input or advance a level. Load sounds or
+enable Preview synth first; if sound setup opens, repeat the selection/click
+after choosing sounds.
+
 GeneralUser GS by S. Christian Collins has its own
 [license](public-release/licenses/GeneralUser-GS-LICENSE.txt), not the app's MIT
 license. See the [author's page](https://www.schristiancollins.com/generaluser)

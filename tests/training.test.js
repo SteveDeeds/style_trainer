@@ -1,10 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDemo, parseMidi } from '../src/midi.js';
-import { buildExercise, groupNotes, inferChord, inputFeedback, LAYERS, LoopScore, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, trackIdOf } from '../src/training.js';
+import { buildExercise, buildStylePreview, groupNotes, inferChord, inputFeedback, LAYERS, LoopScore, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, trackIdOf } from '../src/training.js';
 import { Transport } from '../src/transport.js';
 import { MidiController, preferredMidiPort } from '../src/controller.js';
 import { AudioEngine, monitorNote } from '../src/audio.js';
+
+test('style preview uses four full-density bars of C G Am F with untransposed drums', () => {
+  const style = createDemo();
+  const preview = buildStylePreview(style);
+  assert.deepEqual(preview.chords, ['C', 'G', 'Am', 'F']);
+  assert.equal(preview.bars, 4);
+  assert.equal(preview.durationTicks, 4 * preview.barTicks);
+  assert.equal(preview.level, 4);
+  const original = buildExercise(style, { bars: 4, focus: 'full', level: 4 });
+  assert.equal(preview.target.length, original.target.length);
+  assert.deepEqual(preview.target.filter(note => note.part === 'drums'), original.target.filter(note => note.part === 'drums'));
+  assert.ok(preview.target.some((note, index) => note.part !== 'drums' && note.pitch !== original.target[index].pitch));
+});
+
+test('style preview prefers Main A even when an intro comes first', () => {
+  const style = createDemo();
+  style.sections.unshift({ name: 'Intro A', start: 0, end: style.ppq });
+  assert.equal(buildStylePreview(style).target.length, buildExercise(style, { section: 1, level: 4 }).target.length);
+});
 
 test('live input uses one selected instrument for correct and incorrect pitches with piano fallback', () => {
   const source = { part: 'bass', program: 33 };
