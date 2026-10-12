@@ -76,6 +76,16 @@ sound. These auditions do not score input or advance a level. Load sounds or
 enable Preview synth first; if sound setup opens, repeat the selection/click
 after choosing sounds.
 
+The **88-key piano** below the score is a display-only indicator, not a touch
+keyboard. It always shows the full A0-C8 range (MIDI 21-108). Green keys show
+the selected practice track's target notes at their sounding pitches, including
+CASM retuning; blue outlines show held MIDI or on-screen-pad input. In **Step**
+mode the entire waiting shape stays highlighted until you complete it. **Record**
+still shows the target notes even though the target audio is muted. While stopped
+or counting in, the first shape is shown. Rests clear target highlights during
+playback, and notes outside the piano range are named beneath it. The separate
+**On-screen keys** toggle still controls the playable pads.
+
 GeneralUser GS by S. Christian Collins has its own
 [license](public-release/licenses/GeneralUser-GS-LICENSE.txt), not the app's MIT
 license. See the [author's page](https://www.schristiancollins.com/generaluser)

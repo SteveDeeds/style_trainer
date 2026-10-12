@@ -3,6 +3,7 @@ import { createDemo } from '../src/midi.js';
 import { buildExercise, styleTracks } from '../src/training.js';
 import { clearSavedSounds, readSavedSounds, saveSounds, validateStarter } from '../src/soundfont-cache.js';
 import { AudioEngine } from '../src/audio.js';
+import { PianoKeyboard } from '../src/piano.js';
 import { forgetStyleFolder, readStyleFolder, saveStyleFolder } from '../src/style-folder.js';
 
 export async function verifyStyleFolderUI() {
@@ -270,6 +271,113 @@ export async function verifyNotationLayout() {
 }
 
 // Run on a fresh dev-server page; this smoke test changes practice settings.
+export async function verifyPianoKeyboard() {
+  const $ = id => document.getElementById(id);
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(`Piano regression: ${message}`);
+    checks.push(message);
+  };
+  const until = async predicate => {
+    const deadline = performance.now() + 15000;
+    while (!predicate()) {
+      if (performance.now() > deadline) throw new Error('Piano UI check timed out.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const highlighted = () => [...$('piano-keyboard').querySelectorAll('.target')].map(key => Number(key.dataset.pitch)).sort((a, b) => a - b);
+  const pads = () => [...$('practice-pads').children].map(key => Number(key.dataset.pitch)).sort((a, b) => a - b);
+  const matches = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const change = (id, value) => {
+    $(id).value = value;
+    $(id).dispatchEvent(new Event('change'));
+  };
+  const on = AudioEngine.prototype.on;
+  const off = AudioEngine.prototype.off;
+  const played = [];
+  AudioEngine.prototype.on = function(note) { played.push(note); };
+  AudioEngine.prototype.off = () => {};
+  try {
+    $('stop').click();
+    check($('piano-keyboard').querySelectorAll('.piano-key').length === 88, 'All 88 keys are rendered');
+    check($('piano-keyboard').querySelectorAll('.white').length === 52 &&
+      $('piano-keyboard').querySelectorAll('.black').length === 36, 'Piano has 52 white and 36 black keys');
+    check(!$('piano-keyboard').querySelector('button, [tabindex], [role="button"]'), 'Piano has no playable or focusable keys');
+    $('piano-keyboard').querySelector('[data-pitch="60"]').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    check(!played.length, 'Clicking the piano never plays audio');
+    $('open-devices').click();
+    $('preview').checked = true;
+    $('preview').dispatchEvent(new Event('change'));
+    $('devices-dialog').close();
+    const pianoTrack = [...$('focus').options].find(option => option.textContent.startsWith('Piano'));
+    change('focus', pianoTrack.value);
+    $('layers').lastElementChild.click();
+    $('show-keys').checked = true;
+    $('show-keys').dispatchEvent(new Event('change'));
+    await settle();
+    const first = pads();
+    check(first.length > 1 && matches(highlighted(), first), 'Stopped piano shows the full first target chord');
+    $('step').click();
+    await until(() => $('mode-description').textContent.startsWith('Waiting'));
+    await settle();
+    check(matches(highlighted(), first), 'Step waits with every chord pitch highlighted');
+    const buttons = [...$('practice-pads').children];
+    const shortcuts = 'asdfghjklqwertyui';
+    for (const index of buttons.keys()) {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: shortcuts[index], code: `Key${shortcuts[index].toUpperCase()}`, bubbles: true }));
+      if (index < buttons.length - 1) {
+        await settle();
+        check(matches(highlighted(), first), 'Partially completed Step chord remains fully highlighted');
+      }
+    }
+    await settle();
+    check($('piano-keyboard').querySelectorAll('.held').length === first.length, 'Held pad input appears on the piano');
+    buttons.forEach((button, index) => document.body.dispatchEvent(new KeyboardEvent('keyup', {
+      key: shortcuts[index], code: `Key${shortcuts[index].toUpperCase()}`, bubbles: true,
+    })));
+    await until(() => played.some(note => note.isTarget));
+    $('stop').click();
+    await settle();
+    check(!$('piano-keyboard').querySelector('.held') && matches(highlighted(), first), 'Stop clears input and restores the first shape');
+    played.length = 0;
+    $('play').click();
+    await until(() => played.some(note => note.isTarget));
+    await settle();
+    check(matches(highlighted(), first), 'Play highlights sounding target pitches, not backing notes');
+    $('stop').click();
+    played.length = 0;
+    $('record').click();
+    await until(() => $('record').getAttribute('aria-pressed') === 'true');
+    await settle();
+    check(matches(highlighted(), first), 'Record count-in shows the first shape');
+    await until(() => played.length > 0);
+    await settle();
+    check(!played.some(note => note.isTarget) && matches(highlighted(), first), 'Record shows target pitches while target audio is muted');
+    $('stop').click();
+    const container = document.createElement('div');
+    const status = document.createElement('p');
+    status.id = 'piano-test-status';
+    const piano = new PianoKeyboard(container, status);
+    piano.update([21, 61, 108, 109], [61, 64]);
+    check(container.querySelector('[data-pitch="61"]').classList.contains('target') &&
+      container.querySelector('[data-pitch="61"]').classList.contains('held'), 'Black keys can show target and held state together');
+    check(status.textContent.includes('Outside piano range: C#8'), 'Out-of-range notes are explicitly named');
+    piano.update([], []);
+    check(!container.querySelector('.target, .held'), 'Empty state removes every highlight');
+    const bounds = $('piano-keyboard').getBoundingClientRect();
+    check(bounds.width > 0 && bounds.right <= innerWidth &&
+      document.documentElement.scrollWidth <= innerWidth, 'Full keyboard fits without page-level horizontal overflow');
+    return checks;
+  } finally {
+    $('stop').click();
+    AudioEngine.prototype.on = on;
+    AudioEngine.prototype.off = off;
+    $('show-keys').checked = false;
+    $('show-keys').dispatchEvent(new Event('change'));
+  }
+}
+
 export async function verifyUI() {
   const $ = id => document.getElementById(id);
   const results = [];

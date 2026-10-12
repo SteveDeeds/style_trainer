@@ -4,6 +4,7 @@ import { buildExercise, buildStylePreview, LAYERS, medianTimingOffset, partOf, p
 import { AudioEngine, monitorNote } from './audio.js';
 import { MidiController } from './controller.js';
 import { Notation } from './notation.js';
+import { PianoKeyboard, pianoTargets } from './piano.js';
 import { Transport } from './transport.js';
 import { sourceHarmony } from './yamaha.js';
 import { assetUrl } from './assets.js';
@@ -49,6 +50,11 @@ document.querySelector('#app').innerHTML = `
       <div class="progress-summary"><strong id="accuracy" aria-label="Latest loop accuracy">—<small>%</small></strong><span id="streak-label">90%+ for 3 loops to level up</span><div id="streak" class="streak"></div></div>
       <div id="practice-status" class="practice-status">Full pattern · eligible for level-up</div>
       <div id="notation" class="notation" aria-live="off"></div>
+      <section class="piano-panel" aria-label="Piano note indicator">
+        <div class="piano-heading"><strong>88-key piano</strong><span><i class="piano-target-swatch"></i> Target notes <i class="piano-held-swatch"></i> Held input</span><span>Display only · A0 to C8</span></div>
+        <div id="piano-keyboard" class="piano-keyboard"></div>
+        <p id="piano-status" class="piano-status" aria-live="off"></p>
+      </section>
       <div class="timeline"><div id="timeline-fill"></div></div>
       <div class="score-footer"><span id="score-detail">Record a loop to see your accuracy.</span><span id="loop-count">Loop 1</span></div>
     </section>
@@ -161,6 +167,7 @@ const notify = (message, error = false) => {
 const reportError = error => { console.error(error); notify(error.message || String(error), true); };
 const controller = new MidiController(handleInput, updateDevices, reportError);
 const notation = new Notation($('notation'), note => void auditionNote(note));
+const piano = new PianoKeyboard($('piano-keyboard'), $('piano-status'));
 let auditionRequest = 0;
 let auditionTimer = null;
 let previewName = null;
@@ -357,6 +364,7 @@ function rebuild() {
   lastPadKey = '';
   updateDensity();
   updatePads();
+  updatePiano();
   for (const pad of $('practice-pads').children) {
     pad.classList.toggle('sounding', litCounts.has(Number(pad.dataset.pitch)));
     pad.classList.toggle('held', inputNotes.has(Number(pad.dataset.pitch)));
@@ -504,6 +512,12 @@ function currentGroup() {
   const tick = Math.max(0, (performance.now() - transport.origin - transport.cycle * transport.duration) / transport.msPerTick);
   return targetGroupAt(exercise.groups, tick, TIMING_TOLERANCE_MS / transport.msPerTick);
 }
+function updatePiano() {
+  piano.update(pianoTargets(exercise, {
+    mode: transport.mode, tick: transport.heardPosition(), waiting: transport.waiting,
+    countIn: transport.mode === 'record' && performance.now() - transport.latencyMs < transport.origin,
+  }), transport.held);
+}
 function updatePads() {
   const group = currentGroup();
   const key = group ? `${group.pitches.join(',')}:${group.notes.map(n => n.part).join(',')}` : '';
@@ -563,6 +577,7 @@ function handleInput(pitch, on, velocity = 90, timestamp = performance.now()) {
     transport.held.clear();
     $('received-note').textContent = 'Input port changed. Waiting for a note…';
     $('input-feedback').textContent = 'Match the exact MIDI note numbers shown on the target pads.';
+    updatePiano();
     return;
   }
   if (on && !audio.context) {
@@ -618,6 +633,7 @@ function handleInput(pitch, on, velocity = 90, timestamp = performance.now()) {
       pad.classList.toggle('incorrect', on && result === false);
     }
   }
+  updatePiano();
 }
 async function ensureAudio() {
   await libraryReady;
@@ -1346,6 +1362,7 @@ function animate() {
       [...$('beat-dots').children].forEach((dot, i) => dot.classList.toggle('active', countBeat === i));
     } else if (transport.mode === 'record') $('mode-description').textContent = `Target muted · ±${TIMING_TOLERANCE_MS} ms timing window`;
     updatePads();
+    updatePiano();
   }
   requestAnimationFrame(animate);
 }

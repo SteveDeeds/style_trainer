@@ -88,7 +88,7 @@ main { max-width: 1360px; margin: auto; padding: 8px 20px 110px; }
 .file-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
 .upload-button:focus-within, .sf-upload:focus-within { outline: 3px solid #19bda4; outline-offset: 3px; }
 .workspace { display: grid; grid-template-columns: 1fr 1.3fr; border: 1px solid var(--border); border-radius: 9px; background: #fff; overflow: hidden; }
-.density-panel, .practice-status, .notation, .timeline, .score-footer { grid-column: 1 / -1; min-width: 0; }
+.density-panel, .practice-status, .notation, .piano-panel, .timeline, .score-footer { grid-column: 1 / -1; min-width: 0; }
 .density-panel {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 4px 16px; border-bottom: 1px solid var(--border); background: #f8fbfa;
@@ -132,6 +132,26 @@ main { max-width: 1360px; margin: auto; padding: 8px 20px 110px; }
   overflow: auto; scrollbar-gutter: stable; color: #1d2d40;
 }
 .notation svg { display: block; max-width: none; }
+.piano-panel { margin: 0 16px 10px; }
+.piano-heading {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 6px 14px; margin-bottom: 6px; font-size: 11px; color: var(--muted);
+}
+.piano-heading strong { color: #263449; }
+.piano-heading span { display: inline-flex; align-items: center; gap: 5px; }
+.piano-heading i { width: 10px; height: 10px; border-radius: 2px; margin-left: 6px; }
+.piano-target-swatch { background: #27c3a5; border: 1px solid #007c68; }
+.piano-held-swatch { background: #c2ddff; border: 2px solid #2566bc; }
+.piano-keyboard { border: 2px solid #263449; border-radius: 4px; overflow: hidden; background: #263449; }
+.piano-keyboard svg { display: block; width: 100%; height: clamp(90px, 10vw, 120px); }
+.piano-key rect { stroke: #536779; stroke-width: 1; fill: #fff; }
+.piano-key.black rect { fill: #263449; stroke: #101b2c; }
+.piano-key.target rect { fill: #27c3a5; stroke: #007c68; }
+.piano-key.held rect { stroke: #2566bc; stroke-width: 3; }
+.piano-key.held:not(.target) rect { fill: #c2ddff; }
+.piano-key text { text-anchor: middle; font-size: 9px; fill: #536779; pointer-events: none; }
+.piano-key.target text, .piano-key.held text { fill: #16352d; }
+.piano-status { min-height: 16px; margin-top: 5px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
 .timeline { height: 3px; background: #edf2f4; }
 .timeline > div { height: 100%; background: var(--teal); width: 0; }
 .score-footer { display: flex; justify-content: space-between; gap: 12px; padding: 9px 16px; font-size: 11px; color: var(--muted); }
