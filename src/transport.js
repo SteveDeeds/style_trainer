@@ -9,6 +9,15 @@ export class Transport {
     this.clickEnabled = true;
     this.position = 0;
     this.held = new Set();
+    // Delay between sending a note to the synth and hearing it; record scoring uses heard time.
+    this.latencyMs = 0;
+  }
+  heardPosition(now = this.now()) {
+    if (this.mode !== 'play' && this.mode !== 'record') return this.position;
+    const elapsed = now - this.latencyMs - this.origin;
+    if (elapsed < 0) return 0;
+    if (this.finishing || !this.loop) return Math.min(this.exercise.durationTicks, (elapsed - this.cycle * this.duration) / this.msPerTick);
+    return (elapsed % this.duration) / this.msPerTick;
   }
   start(mode, exercise, bpm) {
     this.stop();
@@ -66,14 +75,15 @@ export class Transport {
         this.lastBeat = beat;
         if (beat < 0 || this.clickEnabled) this.onBeat(((beat % this.exercise.meter.numerator) + this.exercise.meter.numerator) % this.exercise.meter.numerator === 0, beat < 0);
       }
+      const heard = now - this.latencyMs;
       for (const [cycle, score] of this.scores) {
-        if (now >= this.origin + (cycle + 1) * this.duration + TIMING_TOLERANCE_MS) {
+        if (heard >= this.origin + (cycle + 1) * this.duration + TIMING_TOLERANCE_MS) {
           this.scores.delete(cycle);
           this.onResult(score.result(), cycle + 1, score.exercise, score.inputs);
           if (this.mode === 'stop') return;
         }
       }
-      if (this.finishing && now >= this.finishing) { this.stop(); return; }
+      if (this.finishing && heard >= this.finishing) { this.stop(); return; }
     }
     if (this.waiting || this.finishing) return;
     let elapsed = now - this.origin - this.cycle * this.duration;
@@ -144,6 +154,7 @@ export class Transport {
       return this.waiting.group.pitches.includes(pitch);
     }
     if (this.mode === 'record') {
+      timestamp -= this.latencyMs;
       this.feedback = timestamp < this.origin - TIMING_TOLERANCE_MS ? { reason: 'count-in', offsetMs: null, expectedPitches: [] } :
         inputFeedback([...this.scores.values()].flatMap(score => score.expected), pitch, timestamp);
       const candidates = [...this.scores.values()].flatMap(score =>

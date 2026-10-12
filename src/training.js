@@ -273,6 +273,15 @@ export function inputFeedback(expected, pitch, time, tolerance = TIMING_TOLERANC
   };
 }
 
+// Median offset of correct-pitch presses; a steady value reveals uncompensated audio delay.
+export function medianTimingOffset(inputs, minimum = 4) {
+  const offsets = inputs.filter(input => ['hit', 'timing', 'duplicate'].includes(input.feedback?.reason) && Number.isFinite(input.feedback.offsetMs))
+    .map(input => input.feedback.offsetMs).sort((a, b) => a - b);
+  if (offsets.length < minimum) return null;
+  const middle = Math.floor(offsets.length / 2);
+  return offsets.length % 2 ? offsets[middle] : (offsets[middle - 1] + offsets[middle]) / 2;
+}
+
 export function targetGroupAt(groups, tick, toleranceTicks = 0) {
   const near = groups.filter(g => Math.abs(g.tick - tick) <= toleranceTicks);
   return near.reduce((best, group) => !best || Math.abs(group.tick - tick) < Math.abs(best.tick - tick) ? group : best, null)

@@ -25,6 +25,10 @@ export class AudioEngine {
     }
     await this.context.resume();
   }
+  outputLatencyMs() {
+    if (!this.context) return 0;
+    return ((this.context.baseLatency || 0) + (this.context.outputLatency || 0)) * 1000;
+  }
   async loadSoundfont(buffer) {
     const header = new Uint8Array(buffer, 0, Math.min(12, buffer.byteLength));
     if (String.fromCharCode(...header.slice(0, 4)) !== 'RIFF' ||

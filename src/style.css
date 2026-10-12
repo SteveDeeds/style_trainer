@@ -160,6 +160,11 @@ main { max-width: 1360px; margin: auto; padding: 8px 20px 110px; }
 .audio-strip { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; padding: 16px 0; border-block: 1px solid var(--border); }
 .audio-strip > div { width: 100%; }
 .audio-strip small { display: block; font-size: 12px; color: var(--muted); margin-top: 5px; }
+.latency-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 20px 0; padding: 16px 0; border-block: 1px solid var(--border); }
+.latency-strip > div, .latency-strip p { width: 100%; margin: 0; }
+.latency-strip small { display: block; font-size: 12px; color: var(--muted); margin-top: 5px; }
+.latency-strip p { font-size: 12px; color: var(--muted); }
+.latency-strip input { width: 80px; }
 .preview-option { display: flex; align-items: center; gap: 5px; }
 #sound-progress { width: 100%; margin-block: 12px; }
 #starter-setup button { margin-block: 6px; }

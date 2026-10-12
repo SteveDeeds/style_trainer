@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDemo, parseMidi } from '../src/midi.js';
-import { buildExercise, buildStylePreview, groupNotes, inferChord, inputFeedback, LAYERS, LoopScore, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, trackIdOf } from '../src/training.js';
+import { buildExercise, buildStylePreview, groupNotes, inferChord, inputFeedback, LAYERS, LoopScore, medianTimingOffset, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, trackIdOf } from '../src/training.js';
 import { Transport } from '../src/transport.js';
 import { MidiController, preferredMidiPort } from '../src/controller.js';
 import { AudioEngine, monitorNote } from '../src/audio.js';
@@ -724,6 +724,42 @@ function harness() {
   });
   return { transport, exercise, played, results, guides, advance: ms => { now = ms; transport.tick(); } };
 }
+test('record scoring compensates audio output latency so playing with heard audio is on time', () => {
+  const latency = 400;
+  const h = harness();
+  try {
+    h.transport.latencyMs = latency;
+    h.transport.start('record', h.exercise, 120);
+    const origin = h.transport.origin;
+    const first = h.exercise.groups[0];
+    // The listener hears the downbeat 400 ms after it was sent and plays with it.
+    assert.equal(h.transport.input(first.pitches[0], true, origin + first.tick * h.transport.msPerTick + latency), true);
+    assert.equal(h.transport.feedback.reason, 'hit');
+    assert.ok(Math.abs(h.transport.feedback.offsetMs) < 1e-6);
+    // Loop results wait until the delayed audio and tolerance window have passed.
+    h.advance(origin + h.transport.duration + 150);
+    assert.equal(h.results.length, 0);
+    h.advance(origin + h.transport.duration + latency + 150);
+    assert.equal(h.results.length, 1);
+    // Playhead shows what is heard, not what was just sent to the synth.
+    h.transport.latencyMs = latency;
+    assert.equal(h.transport.heardPosition(origin + latency + 500), 500 / h.transport.msPerTick);
+    assert.equal(h.transport.heardPosition(origin + 100), 0);
+  } finally { h.transport.stop(); }
+  const uncompensated = harness();
+  try {
+    uncompensated.transport.start('record', uncompensated.exercise, 120);
+    const first = uncompensated.exercise.groups[0];
+    uncompensated.transport.input(first.pitches[0], true, uncompensated.transport.origin + first.tick * uncompensated.transport.msPerTick + latency);
+    assert.notEqual(uncompensated.transport.feedback.reason, 'hit');
+  } finally { uncompensated.transport.stop(); }
+});
+test('median timing offset calibrates from correct-pitch presses only', () => {
+  const press = (reason, offsetMs) => ({ feedback: { reason, offsetMs } });
+  assert.equal(medianTimingOffset([press('hit', 380), press('timing', 420), press('timing', 400), press('pitch', -900), press('duplicate', 410)]), 405);
+  assert.equal(medianTimingOffset([press('hit', 10), press('pitch', 5)]), null);
+  assert.equal(medianTimingOffset([]), null);
+});
 test('steady click works in Play, pauses in Step, and Record count-in survives click off', () => {
   for (const mode of ['play', 'step', 'record']) {
     const h = harness();

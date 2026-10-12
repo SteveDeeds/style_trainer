@@ -1,6 +1,6 @@
 import './style.css';
 import { createDemo, parseMidi } from './midi.js';
-import { buildExercise, buildStylePreview, LAYERS, partOf, pitchName, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
+import { buildExercise, buildStylePreview, LAYERS, medianTimingOffset, partOf, pitchName, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
 import { AudioEngine, monitorNote } from './audio.js';
 import { MidiController } from './controller.js';
 import { Notation } from './notation.js';
@@ -88,6 +88,12 @@ document.querySelector('#app').innerHTML = `
       <p><a href="https://www.schristiancollins.com/generaluser" target="_blank" rel="noopener noreferrer">About GeneralUser GS by S. Christian Collins</a> · <a id="sound-license" target="_blank" rel="noopener noreferrer">SoundFont license</a></p>
     </section>
     <label>Click sound <select id="click-sound" aria-label="Click sound"><option value="clave">Clave</option><option value="side-stick">Side stick</option></select></label>
+    <section class="latency-strip" aria-label="Timing calibration">
+      <div><b>Timing calibration</b><small id="latency-detail">Detected audio delay appears after sound starts.</small></div>
+      <label>Extra delay <input id="latency-adjust" type="number" min="-300" max="800" step="5" value="0" aria-label="Extra audio delay in milliseconds"> ms</label>
+      <button id="calibrate-latency" class="small-button" disabled>Calibrate from last recording</button>
+      <p id="latency-status" role="status">Record a loop, playing exactly with what you hear, then calibrate if every note reads late or early.</p>
+    </section>
     <details class="results-details"><summary>MIDI diagnostics & style metadata</summary>
         <div class="controller-top"><span>Launchpad LEDs: LPX MIDI / second Windows port, Lighting Custom mode. Channel 1 is steady.</span><button id="test-led" class="small-button">Test LED</button></div>
         <p id="received-note">No input notes received yet.</p><p id="target-description"></p>
@@ -253,6 +259,7 @@ const transport = new Transport({
   onResult: (result, loop, scoredExercise, inputs) => {
     history.push({ ...result, loop, level: scoredExercise.level, inputs, practiceOnly: scoredExercise.practiceOnly, speed: scoredExercise.practiceSpeed, tempoEligible: scoredExercise.nextSpeed != null });
     history = history.slice(-6);
+    $('calibrate-latency').disabled = medianTimingOffset(inputs) === null;
     const advancement = progression.submitExercise(result.score, scoredExercise);
     if (advancement) {
       const leveledUp = progression.level > scoredExercise.level;
@@ -555,7 +562,7 @@ function handleInput(pitch, on, velocity = 90, timestamp = performance.now()) {
   if (on && result !== null) {
     const tick = transport.mode === 'record' && result === true ? transport.feedback.targetTick :
       transport.mode === 'step' ? group?.tick ?? transport.position :
-        ((timestamp - transport.origin) % transport.duration + transport.duration) % transport.duration / transport.msPerTick;
+        ((timestamp - transport.latencyMs - transport.origin) % transport.duration + transport.duration) % transport.duration / transport.msPerTick;
     notation.feedback(pitch, tick, result === true);
   }
   if (on) {
@@ -916,6 +923,7 @@ async function start(mode) {
     notation.render(exercise, notationKey());
     updateDensity();
     transport.start(mode, exercise, exercise.playbackBpm);
+    updateLatency();
     const message = mode === 'record' ? 'One-bar count-in, then your turn. Target part muted; play to the steady clock.' :
       mode === 'step' ? 'Play the highlighted pitches. Hold melodic notes together to complete a shape.' : 'Listen closely. The score and controller follow your target notes.';
     notify(`${message}${starterWarning ? ` ${starterWarning}` : ''}`, Boolean(starterWarning));
@@ -954,6 +962,44 @@ $('click').addEventListener('change', () => {
   notify(transport.clickEnabled ? 'Steady click enabled in all modes; Step pauses it while waiting.' : 'Steady click off. Record still has its one-bar count-in.');
 });
 $('click-sound').addEventListener('change', () => { audio.clickSound = $('click-sound').value; });
+const LATENCY_KEY = 'style-trainer-latency-adjust-ms';
+function readLatencyAdjust() {
+  try {
+    const value = Number(localStorage.getItem(LATENCY_KEY) ?? 0);
+    return Number.isFinite(value) ? Math.max(-300, Math.min(800, value)) : 0;
+  } catch { return 0; }
+}
+function updateLatency() {
+  const detected = audio.outputLatencyMs();
+  const adjust = Number($('latency-adjust').value) || 0;
+  const latency = Math.max(0, Math.min(1000, detected + adjust));
+  const text = audio.context ? `Detected audio delay ${Math.round(detected)} ms · compensating ${Math.round(latency)} ms` :
+    'Detected audio delay appears after sound starts.';
+  transport.latencyMs = latency;
+  if ($('latency-detail').textContent !== text) $('latency-detail').textContent = text;
+}
+function setLatencyAdjust(value) {
+  const adjust = Math.round(Math.max(-300, Math.min(800, value)));
+  $('latency-adjust').value = String(adjust);
+  try { localStorage.setItem(LATENCY_KEY, String(adjust)); } catch { /* Storage may be blocked; the setting still applies now. */ }
+  updateLatency();
+}
+$('latency-adjust').value = String(readLatencyAdjust());
+$('latency-adjust').addEventListener('change', () => {
+  const value = Number($('latency-adjust').value);
+  setLatencyAdjust(Number.isFinite(value) ? value : 0);
+  $('latency-status').textContent = `Extra delay set to ${$('latency-adjust').value} ms.`;
+});
+$('calibrate-latency').addEventListener('click', () => {
+  const offset = medianTimingOffset(history.at(-1)?.inputs ?? []);
+  if (offset === null) {
+    $('latency-status').textContent = 'Need at least 4 correct-pitch presses in the last recorded loop to calibrate.';
+    return;
+  }
+  setLatencyAdjust(Number($('latency-adjust').value) + offset);
+  $('calibrate-latency').disabled = true;
+  $('latency-status').textContent = `Last loop averaged ${Math.round(Math.abs(offset))} ms ${offset < 0 ? 'early' : 'late'}. Extra delay is now ${$('latency-adjust').value} ms; record again to check.`;
+});
 function changeHarmony(next) {
   const previous = randomizedHarmony;
   randomizedHarmony = next;
@@ -1182,6 +1228,7 @@ for (const [triggerId, dialogId] of [['open-style', 'style-dialog'], ['open-devi
     if (dialog.open) { dialog.close(); return; }
     for (const other of document.querySelectorAll('.setup-drawer[open]')) other.close();
     if ($('harmony-popover').matches(':popover-open')) $('harmony-popover').hidePopover();
+    if (dialogId === 'devices-dialog') updateLatency();
     releaseInputs();
     dialog.show();
     trigger.setAttribute('aria-expanded', 'true');
@@ -1270,7 +1317,8 @@ new ResizeObserver(() => {
 }).observe($('notation'));
 function animate() {
   if (exercise) {
-    const tick = transport.position;
+    if (transport.mode !== 'stop') updateLatency();
+    const tick = transport.heardPosition();
     const bar = Math.min(exercise.bars, Math.floor(tick / exercise.barTicks) + 1);
     $('measure').textContent = exercise.sourceBar ? `PATTERN BAR ${String(exercise.sourceBar).padStart(2, '0')} · DRILL` :
       `BAR ${String(bar).padStart(2, '0')} / ${String(exercise.bars).padStart(2, '0')}`;
@@ -1278,8 +1326,8 @@ function animate() {
     notation.update(tick, exercise.barTicks);
     const beat = Math.floor(tick / (exercise.ppq * 4 / exercise.meter.denominator)) % exercise.meter.numerator;
     [...$('beat-dots').children].forEach((dot, i) => dot.classList.toggle('active', beat === i && transport.mode !== 'stop'));
-    if (transport.mode === 'record' && performance.now() < transport.origin) {
-      const remaining = Math.ceil((transport.origin - performance.now()) / transport.beatMs);
+    if (transport.mode === 'record' && performance.now() - transport.latencyMs < transport.origin) {
+      const remaining = Math.ceil((transport.origin - performance.now() + transport.latencyMs) / transport.beatMs);
       $('mode-description').textContent = `Count-in · ${remaining}`;
       const countBeat = (exercise.meter.numerator - remaining) % exercise.meter.numerator;
       [...$('beat-dots').children].forEach((dot, i) => dot.classList.toggle('active', countBeat === i));

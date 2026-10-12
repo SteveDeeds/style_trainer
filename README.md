@@ -328,6 +328,18 @@ The app does not silently remap notes or relax timing. Use Step to verify pitch
 matching first, then Record to check timing against the metronome. The target
 pads retain the current shape throughout its valid ±100 ms scoring window.
 
+### Timing calibration
+
+You hear the backing after the browser's audio output delay, so Record scores
+your presses against when notes are *heard*, not when they were sent to the
+synth. The browser-reported delay (`AudioContext.baseLatency + outputLatency`)
+is compensated automatically, and the playhead and count-in follow the heard
+audio. Bluetooth headphones and some USB/HDMI outputs add delay the browser does
+not report: if every note reads consistently late (or early), record a loop
+playing exactly with what you hear, then choose **Devices & audio → Calibrate
+from last recording**. It sets **Extra delay** to that loop's median offset and
+remembers it in this browser. Wired headphones or speakers give the lowest delay.
+
 ## Notation-first workspace
 
 The main screen prioritizes the score rather than setup cards. The compact
@@ -498,8 +510,9 @@ Full Yamaha phrase fitting/RTR behavior and proprietary Yamaha voices (melodic b
 GM bank 0, percussion to SoundFont bank 128), automatic accompaniment chord
 recognition, continuous-controller automation and pitch-bend are not implemented.
 SMPTE and asynchronous format-2 files are rejected. ±100 ms is the scoring criterion,
-not a guarantee about USB/device latency; browser audio and MIDI hardware latency
-can affect perceived timing. The scheduler polls at 5 ms; keep this tab active.
+not a guarantee about USB/device latency; browser-reported audio output delay is
+compensated and any remaining delay can be calibrated (see Timing calibration).
+The scheduler polls at 5 ms; keep this tab active.
 
 ## Credits
 
