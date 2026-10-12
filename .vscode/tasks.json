@@ -1,0 +1,43 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Style Trainer: public build",
+			"type": "shell",
+			"command": "powershell",
+			"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\scripts\\run.ps1", "publish"],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Style Trainer: build",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\run.ps1",
+				"build"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Style Trainer: dev",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\run.ps1",
+				"dev"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}

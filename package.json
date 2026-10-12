@@ -1,0 +1,21 @@
+{
+  "name": "style-trainer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "build:public": "node scripts/build-public.js",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test tests/*.test.js",
+    "postinstall": "node scripts/copy-synth.js"
+  },
+  "dependencies": {
+    "js-synthesizer": "1.11.0",
+    "vexflow": "4.2.5"
+  },
+  "devDependencies": {
+    "vite": "6.4.4"
+  }
+}

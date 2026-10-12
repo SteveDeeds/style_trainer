@@ -1,0 +1,13 @@
+GeneralUser GS 2.0.3
+
+Author: Chris (S. Christian Collins)
+Upstream project: https://github.com/mrbumpy409/GeneralUser-GS
+Pinned upstream commit: 684543d5e5efaef08d02be50dcda8d552478fa60
+Upstream file: GeneralUser-GS.sf2
+Upstream Git blob: 298b552d2e9d1307e03e5c5c99d2c046aaed9ec3
+File size: 32,319,396 bytes
+SHA-256: 9575028C7A1F589F5770FCCC8CFF2734566AF40CD26ED836944E9A5152688CFE
+License: licenses/GeneralUser-GS-LICENSE.txt
+
+This release hosts its own local copy at soundfonts/generaluser-gs.sf2 rather
+than hotlinking to the author's download.

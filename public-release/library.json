@@ -1,0 +1,12 @@
+{
+  "styles": [],
+  "soundfonts": [
+    {
+      "name": "GeneralUser GS",
+      "url": "soundfonts/generaluser-gs.sf2",
+      "version": "2.0.3",
+      "sha256": "9575028C7A1F589F5770FCCC8CFF2734566AF40CD26ED836944E9A5152688CFE"
+    }
+  ],
+  "edition": "public"
+}
