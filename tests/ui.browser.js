@@ -412,12 +412,12 @@ export async function verifyUI() {
   check($('keys-panel').hidden, 'Keys toggle hides pads');
   $('open-harmony').click();
   await settle();
-  check($('harmony-popover').matches(':popover-open'), 'Harmony popover opens');
+  check($('harmony-popover').matches(':popover-open'), 'Chord progression popover opens');
   $('randomize-chords').click();
   check($('open-harmony').textContent.includes('Randomized'), 'Harmony trigger reflects randomization');
   check($('harmony-summary').textContent.includes('7'), 'Harmony summary shows generated seventh chords');
   $('restore-chords').click();
-  check($('open-harmony').textContent === 'Harmony: Original', 'Restore updates harmony summary');
+  check($('open-harmony').textContent === 'Chord progression: Original', 'Restore updates chord progression summary');
   $('harmony-popover').hidePopover();
   await settle();
   $('open-harmony').click();

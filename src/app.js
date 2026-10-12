@@ -1,6 +1,6 @@
 import './style.css';
 import { createDemo, parseMidi } from './midi.js';
-import { buildExercise, buildStylePreview, LAYERS, medianTimingOffset, partOf, pitchName, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
+import { buildExercise, buildStylePreview, initialHarmony, LAYERS, medianTimingOffset, partOf, pitchName, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
 import { AudioEngine, monitorNote } from './audio.js';
 import { MidiController } from './controller.js';
 import { Notation } from './notation.js';
@@ -38,7 +38,7 @@ document.querySelector('#app').innerHTML = `
       <label>Range <select id="practice-bar" aria-label="Practice bar"><option value="">Full pattern</option></select></label>
       <label><input id="solo" type="checkbox"> Solo practice track</label>
       <label><input id="click" type="checkbox" checked> Click</label>
-      <button id="open-harmony" class="small-button" popovertarget="harmony-popover" aria-controls="harmony-popover">Harmony: Original</button>
+      <button id="open-harmony" class="small-button" popovertarget="harmony-popover" aria-controls="harmony-popover">Chord progression: Original</button>
       <label><input id="show-keys" type="checkbox" aria-controls="keys-panel"> On-screen keys</label>
     </section>
     <section class="workspace">
@@ -106,9 +106,9 @@ document.querySelector('#app').innerHTML = `
     </details>
   </dialog>
   <section id="harmony-popover" class="harmony-popover" popover aria-labelledby="harmony-title">
-    <div class="dialog-heading"><h2 id="harmony-title">Practice harmony</h2><button popovertarget="harmony-popover" popovertargetaction="hide" aria-label="Close harmony options">×</button></div>
+    <div class="dialog-heading"><h2 id="harmony-title">Chord progression</h2><button popovertarget="harmony-popover" popovertargetaction="hide" aria-label="Close chord progression options">×</button></div>
     <p class="drawer-notice" data-notice role="status"></p>
-    <label>Harmony key <select id="harmony-key" aria-label="Harmony key">${['Cb', 'Gb', 'Db', 'Ab', 'Eb', 'Bb', 'F', 'C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'Abm', 'Ebm', 'Bbm', 'Fm', 'Cm', 'Gm', 'Dm', 'Am', 'Em', 'Bm', 'F#m', 'C#m', 'G#m', 'D#m', 'A#m'].map(key => `<option value="${key}">${key.endsWith('m') ? key.slice(0, -1) + ' minor' : key + ' major'}</option>`).join('')}</select></label>
+    <label>Progression key <select id="harmony-key" aria-label="Chord progression key">${['Cb', 'Gb', 'Db', 'Ab', 'Eb', 'Bb', 'F', 'C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'Abm', 'Ebm', 'Bbm', 'Fm', 'Cm', 'Gm', 'Dm', 'Am', 'Em', 'Bm', 'F#m', 'C#m', 'G#m', 'D#m', 'A#m'].map(key => `<option value="${key}">${key.endsWith('m') ? key.slice(0, -1) + ' minor' : key + ' major'}</option>`).join('')}</select></label>
     <p id="harmony-summary">Original harmony</p>
     <div class="drawer-actions"><button id="randomize-chords" class="small-button">Randomize chords</button><button id="restore-chords" class="small-button" disabled>Restore harmony</button></div>
     <p>One chord per bar. Changing harmony resets the streak, not unlocked levels. Full-pattern randomized exercises qualify for speed and level advancement.</p>
@@ -119,7 +119,7 @@ document.querySelector('#app').innerHTML = `
     <p>Timing is measured within <b>±${TIMING_TOLERANCE_MS} ms</b> using MIDI event timestamps. Wrong and extra notes count against you. Score at least <b>90% on three consecutive full-pattern loops at normal tempo</b> to stop automatically, hear congratulations, and unlock the next layer. Press a transport button when ready to continue.</p>
     <p><b>Range</b> lets you drill any individual bar. At full-pattern settings and the original base BPM, <b>Speed</b> advances through 50% → 75% → 100% after three consecutive Record loops at 90%+. Each achievement stops and celebrates; start again when ready. At 100%, the same streak passes the density level. Single-bar drills, 25%/90% speeds and a lowered base BPM remain practice-only.</p>
     <p>The score emphasizes <b>note attacks</b>: short release rests can become a longer note, with a staccato dot for clearly short articulation. Meaningful rests remain. Ties are reserved for beat/bar boundaries; no automatic tenuto or legato is inferred. Audio and scoring retain source timing.</p>
-    <p><b>Change style</b> opens the local library, import and demo controls. <b>Devices & audio</b> contains MIDI ports, SoundFont loading, Preview synth, click sound and diagnostics. <b>Harmony</b> offers key selection, randomization and restore. Enable <b>On-screen keys</b> for playable pads; MIDI works with them hidden. Click a level indicator while stopped to inspect any density.</p>
+    <p><b>Change style</b> opens the local library, import and demo controls. <b>Devices & audio</b> contains MIDI ports, SoundFont loading, Preview synth, click sound and diagnostics. <b>Chord progression</b> offers key selection, randomization and restore. Enable <b>On-screen keys</b> for playable pads; MIDI works with them hidden. Click a level indicator while stopped to inspect any density.</p>
     <p>Files are processed locally. Yamaha CASM source chords, NTR/NTT rules, guitar-tuning voicing, pitch limits and RTR note actions guide randomized-harmony playback; ordinary MIDI uses inferred harmony. Guitar voicing is an approximation, not Yamaha firmware's proprietary generator. NOTE GENERATOR RTR requires style-specific data not carried by the imported MIDI and is reported as unsupported. Pitch-shift RTR uses one synth channel per sustained voice and reports exhaustion. Tempo is fixed to the selected BPM. Notation quantizes to sixteenths; scoring uses original timing.</p>
     <p>Use Chrome or Edge on localhost/HTTPS for MIDI. For Launchpad X LEDs, choose LPX MIDI (second Windows interface) and a compatible Lighting Custom layout. Channel 1 provides steady colour. No SysEx is sent. Generic MIDI keyboards may not support LEDs.</p>
     <p>The supplied JJazzLab SF2 is large (~340 MiB). The first load may take a few seconds. Use a smaller licensed GM SF2 or explicitly select Preview synth for lightweight practice. Preview audio is not GM-quality.</p>
@@ -340,7 +340,7 @@ function updateExerciseDescription() {
     $('target-description').textContent += ` · Source ${sourceHarmony(policy).name} · ${rules.join(', ')}`;
   }
   $('practice-status').textContent = `${Math.round(exercise.playbackBpm * 10) / 10} BPM · ${exercise.nextSpeed != null ? `${exercise.practiceSpeed}% · eligible for speed-up to ${exercise.nextSpeed}%` : exercise.practiceOnly ? 'Practice only — no level-up credit' : 'Full pattern · eligible for level-up'}`;
-  $('open-harmony').textContent = randomizedHarmony ? `Harmony: ${$('harmony-key').value} · Randomized` : 'Harmony: Original';
+  $('open-harmony').textContent = randomizedHarmony ? `Chord progression: ${$('harmony-key').value} · Randomized` : 'Chord progression: Original';
   $('harmony-summary').textContent = exercise.chords.filter(Boolean).join(' → ') || 'No source chord available';
 }
 function resetProgress() {
@@ -374,10 +374,11 @@ function rebuild() {
 function setStyle(next) {
   stopAudition();
   style = next;
-  randomizedHarmony = null;
   $('section').replaceChildren(...style.sections.map((s, i) => new Option(s.name, i)));
   updateTracks('');
-  $('harmony-key').value = style.key === 'Unknown' ? (sourcePolicy() ? sourceHarmony(sourcePolicy()).key : 'C') : style.key;
+  randomizedHarmony = initialHarmony(style, Number($('bars').value));
+  $('harmony-key').value = randomizedHarmony ? 'C' :
+    style.key === 'Unknown' ? (sourcePolicy() ? sourceHarmony(sourcePolicy()).key : 'C') : style.key;
   const start = style.sections[0].start;
   $('bpm').value = Math.round(style.tempos.filter(t => t.tick <= start).at(-1)?.bpm ?? 120);
   $('practice-bar').value = '';
@@ -1059,7 +1060,7 @@ $('restore-chords').addEventListener('click', () => {
 $('harmony-key').addEventListener('change', () => {
   try {
     changeHarmony(null);
-    notify('Harmony key selected. Press Randomize chords to generate a progression in this key.');
+    notify('Progression key selected. Press Randomize chords to generate a progression in this key.');
   } catch (error) { reportError(error); }
 });
 for (const id of ['focus', 'bars', 'section', 'bpm']) $(id).addEventListener('change', () => {
@@ -1116,7 +1117,7 @@ $('load-style').addEventListener('click', async () => {
     const next = parseMidi(data.buffer, data.name);
     buildExercise(next);
     setStyle(next);
-    notify(`Loaded ${entry.category} / ${entry.name}. Select a practice track and section.`);
+    notify(`Loaded ${entry.category} / ${entry.name}. ${next.sourceType === 'style' ? 'A random C-major chord progression was selected.' : 'Using chords from the MIDI arrangement.'} Select a practice track and section.`);
   } catch (error) { reportError(error); }
   finally { busy = false; updateTransport(); }
 });
@@ -1164,7 +1165,7 @@ $('style-file').addEventListener('change', async event => {
     // Validate before replacing the currently working exercise.
     buildExercise(next);
     setStyle(next);
-    notify(`Loaded ${file.name}. ${next.casm.length ? 'Yamaha source chords and transposition policies loaded' : 'MIDI arrangement with inferred chords'}; fixed practice tempo.`);
+    notify(`Loaded ${file.name}. ${next.sourceType === 'style' ? 'A random C-major chord progression was selected' : 'Using chords inferred from the MIDI arrangement'}${next.casm.length ? '; Yamaha source-chord transposition policies loaded' : ''}; fixed practice tempo.`);
     void auditionStyle(next);
   } catch (error) { reportError(error); }
   finally { event.target.value = ''; }

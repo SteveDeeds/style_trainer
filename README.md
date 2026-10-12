@@ -231,7 +231,11 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
   Step pauses the click while waiting for input. Record always has an audible
   one-bar count-in, even with Click off. Controls can be changed while stopped.
 - **Randomize chords**: generates one diatonic seventh chord per parent exercise
-  bar in the selected **Harmony key**, major/natural-minor (maj7, m7, 7, m7b5).
+  bar in the selected **Progression key**, major/natural-minor (maj7, m7, 7, m7b5).
+  Loading a Yamaha style (`.sty`, `.prs` or `.sst`) automatically starts with a
+  random progression in C major instead of repeating its common Cmaj7 source
+  chord. Loading a standard MIDI file (`.mid` or `.midi`) keeps the chords
+  inferred from that arrangement.
   Yamaha parts use their section/source-channel CASM source chord and
   transposition policies, not a chord guessed from the other instruments.
   Root Trans Bass/Melody uses a key-aware diatonic shift: RocknRoll's
@@ -241,7 +245,7 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
   High Key and per-part note limits apply; out-of-range notes move by octaves.
   Source onsets, durations, velocities and instrument programs remain unchanged.
   Ordinary MIDI without Yamaha policies retains heuristic reharmonization.
-  Harmony key defaults to the file's key when present, otherwise the selected
+  Progression key defaults to the file's key when present, otherwise the selected
   part's source chord tonic/quality, or explicitly C major if neither exists.
   A missing SMF key signature is not confused with a missing Yamaha source
   chord: the header shows **Source chord**, e.g. Cmaj7, when available.
@@ -365,7 +369,7 @@ notation. Play/Step/Record/Stop/Loop and volume remain in the fixed bottom bar.
   loading, Preview synth and click timbre. Expand MIDI diagnostics & style
   metadata for received pitches, LED tests and authored transposition rules.
   The header always reports MIDI/audio readiness.
-- **Harmony** opens key selection, Randomize/Restore and the current chord
+- **Chord progression** opens key selection, Randomize/Restore and the current chord
   progression; its trigger shows whether the harmony is original or randomized.
 - **On-screen keys** is off initially for controller-first practice. Enable it
   to see playable pads and use their keyboard shortcuts. Hiding it releases

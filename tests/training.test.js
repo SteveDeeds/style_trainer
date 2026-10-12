@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDemo, parseMidi } from '../src/midi.js';
-import { buildExercise, buildStylePreview, groupNotes, inferChord, inputFeedback, LAYERS, LoopScore, medianTimingOffset, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, trackIdOf } from '../src/training.js';
+import { buildExercise, buildStylePreview, groupNotes, inferChord, initialHarmony, inputFeedback, LAYERS, LoopScore, medianTimingOffset, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, trackIdOf } from '../src/training.js';
 import { Transport } from '../src/transport.js';
 import { MidiController, preferredMidiPort } from '../src/controller.js';
 import { AudioEngine, monitorNote } from '../src/audio.js';
@@ -17,6 +17,13 @@ test('style preview uses four full-density bars of C G Am F with untransposed dr
   assert.equal(preview.target.length, original.target.length);
   assert.deepEqual(preview.target.filter(note => note.part === 'drums'), original.target.filter(note => note.part === 'drums'));
   assert.ok(preview.target.some((note, index) => note.part !== 'drums' && note.pitch !== original.target[index].pitch));
+});
+
+test('loaded Yamaha styles start with a C-major progression while MIDI keeps source harmony', () => {
+  const samples = [0, 1 / 7, 2 / 7, 3 / 7];
+  const styleHarmony = initialHarmony({ sourceType: 'style' }, 4, () => samples.shift());
+  assert.deepEqual(styleHarmony.map(chord => chord.name), ['Cmaj7', 'Dm7', 'Em7', 'Fmaj7']);
+  assert.equal(initialHarmony({ sourceType: 'midi' }, 4, () => 0), null);
 });
 
 test('style preview prefers Main A even when an intro comes first', () => {
@@ -491,6 +498,7 @@ test('SMF parser handles tempo, meter, key, programs, running status and velocit
     0, 0xff, 0x2f, 0,
   ]), 'Groove.mid');
   assert.equal(style.name, 'Groove');
+  assert.equal(style.sourceType, 'midi');
   assert.equal(style.tempos[0].bpm, 120);
   assert.equal(style.key, 'C');
   assert.equal(style.notes[0].duration, 480);
@@ -502,6 +510,12 @@ test('parser closes repeated overlapping pitches independently', () => {
     0, 0x90, 60, 90, 120, 60, 80, 120, 0x80, 60, 0, 120, 60, 0, 0, 0xff, 0x2f, 0,
   ]));
   assert.deepEqual(style.notes.map(n => n.duration), [240, 240]);
+});
+test('SMF parser identifies Yamaha style filename extensions', () => {
+  const data = midi([0, 0x90, 60, 90, 120, 0x80, 60, 0, 0, 0xff, 0x2f, 0]);
+  for (const extension of ['sty', 'prs', 'sst']) {
+    assert.equal(parseMidi(data, `example.${extension}`).sourceType, 'style');
+  }
 });
 test('program and bank changes in a different SMF track apply by channel and time', () => {
   const control = [0, 0xc1, 33, 0, 0xff, 0x2f, 0];

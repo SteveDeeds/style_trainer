@@ -172,6 +172,7 @@ export function parseMidi(buffer, filename = 'Imported style') {
   }
   return {
     name: filename.replace(/\.(mid|midi|sty|prs|sst)$/i, ''),
+    sourceType: /\.(sty|prs|sst)$/i.test(filename) ? 'style' : 'midi',
     ppq, notes, key, tempos, meters, maxTick, casm,
     sections: sections.length ? sections : [{ name: 'Whole arrangement', start: 0, end: maxTick }],
   };
@@ -200,6 +201,7 @@ export function createDemo() {
   });
   return {
     name: 'Midnight Pocket', ppq, notes: notes.sort((a, b) => a.tick - b.tick),
+    sourceType: 'demo',
     key: 'C', tempos: [{ tick: 0, bpm: 96 }],
     meters: [{ tick: 0, numerator: 4, denominator: 4 }],
     maxTick: ppq * 32, sections: [{ name: 'Main A', start: 0, end: ppq * 32 }], demo: true,

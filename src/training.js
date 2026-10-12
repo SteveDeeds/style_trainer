@@ -109,6 +109,10 @@ export function randomHarmony(key, bars, random = Math.random) {
   });
 }
 
+export function initialHarmony(style, bars, random = Math.random) {
+  return style.sourceType === 'style' ? randomHarmony('C', bars, random) : null;
+}
+
 function reharmonize(notes, harmony, barTicks, ppq, denominator) {
   const changes = harmonyChanges(notes);
   return notes.map(note => {
