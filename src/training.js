@@ -103,7 +103,9 @@ export function randomHarmony(key, bars, random = Math.random) {
       (scale[(degree + index) % 7] - scale[degree] + 12) % 12);
     const diminished = intervals[4] === 6;
     const minor = intervals[2] === 3;
-    return { root, intervals, minor, name: names[root] + (diminished ? 'm7b5' : minor ? 'm7' : intervals[6] === 11 ? 'maj7' : '7') };
+    const chordIntervals = [0, intervals[2], intervals[4], intervals[6]];
+    return { root, intervals, minor, chordIntervals,
+      name: names[root] + (diminished ? 'm7b5' : minor ? 'm7' : intervals[6] === 11 ? 'maj7' : '7') };
   });
 }
 
@@ -112,7 +114,26 @@ function reharmonize(notes, harmony, barTicks, ppq, denominator) {
   return notes.map(note => {
     if (note.part === 'drums') return note;
     const bar = Math.floor(note.tick / barTicks);
-    if (note.yamaha) return { ...note, pitch: transposeYamaha(note, harmony[bar]) };
+    if (note.yamaha) {
+      const pitch = transposeYamaha(note, harmony[bar]);
+      const pitchChanges = [];
+      for (let changeBar = bar + 1; changeBar < harmony.length && changeBar * barTicks < note.tick + note.duration; changeBar++) {
+        const range = note.yamaha.ranges.length === 1 ? note.yamaha.ranges[0] :
+          note.pitch < note.yamaha.lowBoundary ? note.yamaha.ranges[0] :
+            note.pitch > note.yamaha.highBoundary ? note.yamaha.ranges[2] : note.yamaha.ranges[1];
+        if (range.rtr === 0) pitchChanges.push({ tick: changeBar * barTicks, action: 'stop' });
+        else if (range.rtr === 1 || range.rtr === 2) {
+          pitchChanges.push({ tick: changeBar * barTicks, action: 'pitch',
+            pitch: transposeYamaha(note, harmony[changeBar], { toRoot: range.rtr === 2 }) });
+        } else if (range.rtr === 3 || range.rtr === 4) {
+          pitchChanges.push({ tick: changeBar * barTicks, action: 'retrigger',
+            pitch: transposeYamaha(note, harmony[changeBar], { toRoot: range.rtr === 4 }) });
+        } else if (range.rtr === 5) {
+          throw new Error(`Yamaha NOTE GENERATOR RTR is not supported for ${note.yamaha.name}; generator metadata is not present in this MIDI file.`);
+        }
+      }
+      return { ...note, pitch, pitchChanges };
+    }
     const inBar = notes.filter(n => n.tick >= bar * barTicks && n.tick < (bar + 1) * barTicks);
     const sourceChord = changes.filter(change => change.tick <= note.tick).at(-1)?.chord ??
       changes.find(change => change.tick >= bar * barTicks && change.tick < (bar + 1) * barTicks)?.chord ??
@@ -242,10 +263,18 @@ export function practiceExercise(exercise, { bar = null, bpm, normalBpm, speed =
   if (bar === null) return { ...exercise, playbackBpm, practiceOnly, practiceSpeed: speed, nextSpeed };
   const start = bar * exercise.barTicks;
   const end = start + exercise.barTicks;
-  const slice = notes => notes.filter(n => n.tick < end && n.tick + n.duration > start).map(n => ({
-    ...n, tick: Math.max(0, n.tick - start),
-    duration: Math.min(end, n.tick + n.duration) - Math.max(start, n.tick),
-  }));
+  const slice = notes => notes.flatMap(n => {
+    if (n.tick >= end || n.tick + n.duration <= start) return [];
+    const priorChanges = n.pitchChanges?.filter(change => change.tick < start) ?? [];
+    if (priorChanges.at(-1)?.action === 'stop') return [];
+    const activePitch = priorChanges.at(-1)?.pitch ?? n.pitch;
+    return [{
+      ...n, pitch: activePitch, tick: Math.max(0, n.tick - start),
+      duration: Math.min(end, n.tick + n.duration) - Math.max(start, n.tick),
+      pitchChanges: n.pitchChanges?.filter(change => change.tick >= start && change.tick < end)
+        .map(change => ({ ...change, tick: change.tick - start })),
+    }];
+  });
   const target = slice(exercise.target);
   return {
     ...exercise, target, backing: slice(exercise.backing), groups: groupNotes(target),

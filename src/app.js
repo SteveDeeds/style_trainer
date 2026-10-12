@@ -114,7 +114,7 @@ document.querySelector('#app').innerHTML = `
     <p><b>Range</b> lets you drill any individual bar. At full-pattern settings and the original base BPM, <b>Speed</b> advances through 50% → 75% → 100% after three consecutive Record loops at 90%+. Each achievement stops and celebrates; start again when ready. At 100%, the same streak passes the density level. Single-bar drills, 25%/90% speeds and a lowered base BPM remain practice-only.</p>
     <p>The score emphasizes <b>note attacks</b>: short release rests can become a longer note, with a staccato dot for clearly short articulation. Meaningful rests remain. Ties are reserved for beat/bar boundaries; no automatic tenuto or legato is inferred. Audio and scoring retain source timing.</p>
     <p><b>Change style</b> opens the local library, import and demo controls. <b>Devices & audio</b> contains MIDI ports, SoundFont loading, Preview synth, click sound and diagnostics. <b>Harmony</b> offers key selection, randomization and restore. Enable <b>On-screen keys</b> for playable pads; MIDI works with them hidden. Click a level indicator while stopped to inspect any density.</p>
-    <p>Files are processed locally. Yamaha CASM source chords and per-part rules guide transposition; ordinary MIDI uses inferred harmony. Full Yamaha Guitar/RTR behavior and proprietary voices are not implemented. Tempo is fixed to the selected BPM. Notation quantizes to sixteenths; scoring uses original timing.</p>
+    <p>Files are processed locally. Yamaha CASM source chords, NTR/NTT rules, guitar-tuning voicing, pitch limits and RTR note actions guide randomized-harmony playback; ordinary MIDI uses inferred harmony. Guitar voicing is an approximation, not Yamaha firmware's proprietary generator. NOTE GENERATOR RTR requires style-specific data not carried by the imported MIDI and is reported as unsupported. Pitch-shift RTR uses one synth channel per sustained voice and reports exhaustion. Tempo is fixed to the selected BPM. Notation quantizes to sixteenths; scoring uses original timing.</p>
     <p>Use Chrome or Edge on localhost/HTTPS for MIDI. For Launchpad X LEDs, choose LPX MIDI (second Windows interface) and a compatible Lighting Custom layout. Channel 1 provides steady colour. No SysEx is sent. Generic MIDI keyboards may not support LEDs.</p>
     <p>The supplied JJazzLab SF2 is large (~340 MiB). The first load may take a few seconds. Use a smaller licensed GM SF2 or explicitly select Preview synth for lightweight practice. Preview audio is not GM-quality.</p>
   </dialog>
@@ -166,8 +166,9 @@ let auditionTimer = null;
 let previewName = null;
 const auditionNotes = new Set();
 const previewTransport = new Transport({
-  noteOn: note => { auditionNotes.add(note); audio.on(note); },
-  noteOff: note => { audio.off(note); auditionNotes.delete(note); },
+  noteOn: (note, id) => { auditionNotes.add(note); audio.on(note, id); },
+  noteOff: (note, id) => { audio.off(note, id); auditionNotes.delete(note); },
+  retune: (note, pitch, id) => audio.retune(note, pitch, id),
   silence: () => {
     clearTimeout(auditionTimer);
     for (const note of auditionNotes) audio.off(note);
@@ -235,15 +236,15 @@ async function auditionNote(source) {
   } catch (error) { if (request === auditionRequest) reportError(error); }
 }
 const transport = new Transport({
-  noteOn: note => {
-    audio.on(note);
+  noteOn: (note, id) => {
+    audio.on(note, id);
     if (note.isTarget) {
       litCounts.set(note.pitch, (litCounts.get(note.pitch) ?? 0) + 1);
       controller.light(note.pitch, true);
     }
   },
-  noteOff: note => {
-    audio.off(note);
+  noteOff: (note, id) => {
+    audio.off(note, id);
     if (note.isTarget) {
       const count = (litCounts.get(note.pitch) ?? 1) - 1;
       if (count <= 0) {
@@ -251,6 +252,18 @@ const transport = new Transport({
         if (!transport.waiting?.group.pitches.includes(note.pitch)) controller.light(note.pitch, false);
       }
       else litCounts.set(note.pitch, count);
+    }
+  },
+  retune: (note, pitch, id) => {
+    audio.retune(note, pitch, id);
+    if (note.isTarget) {
+      const oldCount = (litCounts.get(note.pitch) ?? 1) - 1;
+      if (oldCount <= 0) {
+        litCounts.delete(note.pitch);
+        controller.light(note.pitch, false);
+      } else litCounts.set(note.pitch, oldCount);
+      litCounts.set(pitch, (litCounts.get(pitch) ?? 0) + 1);
+      controller.light(pitch, true);
     }
   },
   silence: () => { audio.silence(); inputNotes.clear(); litCounts.clear(); controller.clear(); },

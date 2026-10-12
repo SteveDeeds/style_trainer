@@ -16,6 +16,9 @@
     "vexflow": "4.2.5"
   },
   "devDependencies": {
-    "vite": "6.4.4"
+    "vite": "6.4.3"
+  },
+  "overrides": {
+    "rollup": "4.64.0"
   }
 }

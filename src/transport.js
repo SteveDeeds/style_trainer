@@ -1,14 +1,15 @@
 import { inputFeedback, LoopScore, TIMING_TOLERANCE_MS } from './training.js';
 
 export class Transport {
-  constructor({ now = () => performance.now(), noteOn, noteOff, silence, guide, onState, onResult, onLoop, onError, onBeat = () => {} }) {
-    Object.assign(this, { now, noteOn, noteOff, silence, guide, onState, onResult, onLoop, onError, onBeat });
+  constructor({ now = () => performance.now(), noteOn, noteOff, retune = () => {}, silence, guide, onState, onResult, onLoop, onError, onBeat = () => {} }) {
+    Object.assign(this, { now, noteOn, noteOff, retune, silence, guide, onState, onResult, onLoop, onError, onBeat });
     this.mode = 'stop';
     this.loop = true;
     this.solo = false;
     this.clickEnabled = true;
     this.position = 0;
     this.held = new Set();
+    this.activeNotes = new Map();
     // Delay between sending a note to the synth and hearing it; record scoring uses heard time.
     this.latencyMs = 0;
   }
@@ -45,9 +46,11 @@ export class Transport {
   makeEvents(exercise) {
     return [...(this.solo ? [] : exercise.backing), ...(this.mode === 'record' ? [] : exercise.target)]
       .flatMap((note, id) => [
-        { tick: note.tick, on: true, note, id },
-        { tick: note.tick + note.duration, on: false, note, id },
-      ]).sort((a, b) => a.tick - b.tick || Number(a.on) - Number(b.on));
+        { tick: note.tick, type: 'on', note, id },
+        { tick: note.tick + note.duration, type: 'off', note, id },
+        ...(note.pitchChanges ?? []).map(change => ({ ...change, type: change.action, note, id })),
+      ]).sort((a, b) => a.tick - b.tick ||
+        ({ off: 0, stop: 0, pitch: 1, retrigger: 2, on: 3 }[a.type] - { off: 0, stop: 0, pitch: 1, retrigger: 2, on: 3 }[b.type]));
   }
   prepareScore(cycle, exercise) {
     if (this.mode === 'record' && (this.loop || cycle <= this.cycle)) {
@@ -107,15 +110,34 @@ export class Transport {
     }
     while (this.eventIndex < this.events.length && this.events[this.eventIndex].tick <= this.position + 1e-7) {
       const event = this.events[this.eventIndex++];
-      if (this.waiting && event.on && event.tick === this.waiting.group.tick) {
+      if (this.waiting && event.type === 'on' && event.tick === this.waiting.group.tick) {
         this.eventIndex--;
         break;
       }
-      if (event.on) this.noteOn(event.note);
-      else this.noteOff(event.note);
+      if (event.type === 'on') {
+        this.noteOn(event.note, event.id);
+        this.activeNotes.set(event.id, event.note);
+      } else if (event.type === 'off' || event.type === 'stop') {
+        const active = this.activeNotes.get(event.id);
+        if (active) this.noteOff(active, event.id);
+        this.activeNotes.delete(event.id);
+      } else if (event.type === 'pitch') {
+        const active = this.activeNotes.get(event.id);
+        if (active) {
+          this.retune(active, event.pitch, event.id);
+          this.activeNotes.set(event.id, { ...active, pitch: event.pitch });
+        }
+      } else if (event.type === 'retrigger') {
+        const active = this.activeNotes.get(event.id);
+        if (active) this.noteOff(active, event.id);
+        const retargeted = { ...event.note, pitch: event.pitch };
+        this.noteOn(retargeted, event.id);
+        this.activeNotes.set(event.id, retargeted);
+      }
     }
     if (!this.waiting && elapsed >= this.duration) {
       this.silence();
+      this.activeNotes.clear();
       this.guide([]);
       if (!this.loop) {
         if (this.mode === 'record') this.finishing = this.origin + (this.cycle + 1) * this.duration + TIMING_TOLERANCE_MS;
@@ -173,6 +195,7 @@ export class Transport {
   }
   stop() {
     clearInterval(this.timer);
+    this.activeNotes.clear();
     this.mode = 'stop';
     this.position = 0;
     this.cycle = 0;

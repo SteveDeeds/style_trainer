@@ -54,6 +54,86 @@ test('loaded audio monitors any MIDI note without transport playback', () => {
   assert.deepEqual(messages, [['program', 15, 7, 0, 33], ['on', 15, 61, 80], ['off', 15, 61]]);
 });
 
+test('RTR pitch bends use an isolated synth channel and fail explicitly when channels are exhausted', () => {
+  const messages = [];
+  const audio = new AudioEngine();
+  audio.context = { currentTime: 0 };
+  audio.soundfont = 7;
+  audio.synth = {
+    midiProgramSelect: (...args) => messages.push(['program', ...args]),
+    midiPitchWheelSensitivity: (...args) => messages.push(['sensitivity', ...args]),
+    midiNoteOn: (...args) => messages.push(['on', ...args]),
+    midiNoteOff: (...args) => messages.push(['off', ...args]),
+    midiPitchBend: (...args) => messages.push(['bend', ...args]),
+    midiAllSoundsOff: () => {},
+  };
+  const note = { pitch: 60, velocity: 90, channel: 3, program: 0, pitchChanges: [{ action: 'pitch', pitch: 65 }] };
+  audio.on(note, 1);
+  const channel = messages.find(message => message[0] === 'on')[1];
+  assert.notEqual(channel, note.channel);
+  audio.retune(note, 65, 1);
+  audio.off(note, 1);
+  assert.ok(messages.some(message => message[0] === 'bend' && message[1] === channel && message[2] !== 8192));
+  assert.ok(messages.some(message => message[0] === 'off' && message[1] === channel && message[2] === 60));
+
+  const busy = new AudioEngine();
+  busy.context = { currentTime: 0 };
+  busy.soundfont = 7;
+  busy.synth = audio.synth;
+  for (let id = 0; id < 14; id++) busy.on({ ...note, channel: 15 }, id);
+  assert.throws(() => busy.on({ ...note, channel: 15 }, 14), /all melodic channels are occupied/);
+  busy.silence();
+});
+
+test('ordinary polyphonic notes share their source channel without exhausting CASM channels', () => {
+  const messages = [];
+  const audio = new AudioEngine();
+  audio.context = { currentTime: 0 };
+  audio.soundfont = 7;
+  audio.synth = {
+    midiProgramSelect: (...args) => messages.push(['program', ...args]),
+    midiNoteOn: (...args) => messages.push(['on', ...args]),
+    midiNoteOff: (...args) => messages.push(['off', ...args]),
+    midiAllSoundsOff: () => {},
+  };
+  for (let pitch = 48; pitch < 63; pitch++) {
+    audio.on({ pitch, velocity: 90, channel: 3, program: 0 });
+  }
+  assert.deepEqual(messages.filter(([type]) => type === 'on').map(([, channel]) => channel), Array(15).fill(3));
+  audio.silence();
+});
+
+test('transport dispatches sustained CASM pitch changes without retriggering', () => {
+  let now = 0;
+  const calls = [];
+  const transport = new Transport({
+    now: () => now,
+    noteOn: (note, id) => calls.push(['on', note.pitch, id]),
+    noteOff: (note, id) => calls.push(['off', note.pitch, id]),
+    retune: (note, pitch, id) => calls.push(['pitch', note.pitch, pitch, id]),
+    silence: () => {},
+    guide: () => {},
+    onState: () => {},
+    onResult: () => {},
+    onLoop: () => {},
+    onError: error => { throw error; },
+  });
+  const exercise = {
+    backing: [], target: [{ tick: 0, duration: 500, pitch: 69, velocity: 90, channel: 3,
+      pitchChanges: [{ tick: 384, action: 'pitch', pitch: 65 }] }],
+    ppq: 96, durationTicks: 768, meter: { numerator: 4, denominator: 4 }, groups: [],
+  };
+  transport.start('play', exercise, 120);
+  clearInterval(transport.timer);
+  now = transport.origin;
+  transport.tick();
+  now = transport.origin + 384 * transport.msPerTick;
+  transport.tick();
+  assert.deepEqual(calls.map(call => call[0]), ['on', 'pitch']);
+  assert.deepEqual(calls[1].slice(1, 3), [69, 65]);
+  transport.stop();
+});
+
 test('Launchpad port selection prefers MIDI second interface over DAW and ignores disconnected ports', () => {
   const ports = [
     { id: 'daw', name: 'Launchpad X DAW', state: 'connected' },
