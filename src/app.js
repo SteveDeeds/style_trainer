@@ -10,7 +10,7 @@ import { sourceHarmony } from './yamaha.js';
 import { assetUrl } from './assets.js';
 import { clearSavedSounds, downloadSounds, readSavedSounds, saveSounds, validateStarter } from './soundfont-cache.js';
 import { folderPermission, forgetStyleFolder, readStyleEntry, readStyleFolder, saveStyleFolder, scanStyleFolder, stylesFromFiles } from './style-folder.js';
-import { buildMasteryView, leafProgress, loadMastery, recordAdvancementToMastery, recordLoopToMastery, registerStyleCatalog, saveMastery, TROPHIES } from './mastery.js';
+import { buildMasteryView, leafProgress, loadMastery, qualifiesForDetailedMastery, recordAdvancementToMastery, recordLoopToMastery, registerStyleCatalog, saveMastery, TROPHIES } from './mastery.js';
 
 const icons = {
   play: '<path d="m8 5 11 7-11 7Z"/>',
@@ -341,7 +341,12 @@ const transport = new Transport({
     const advancement = progression.submitExercise(result.score, scoredExercise);
     if (advancement) {
       const leveledUp = progression.level > scoredExercise.level;
-      const isMastered = scoredExercise.level >= maxLevel && progression.level === maxLevel && !advancement.nextSpeed;
+      const isMastered = qualifiesForDetailedMastery({
+        completedLevel: scoredExercise.level,
+        maxLevel,
+        nextLevel: progression.level,
+        nextSpeed: advancement.nextSpeed,
+      });
       transport.stop();
       if (advancement.nextSpeed) $('practice-speed').value = String(advancement.nextSpeed);
       exercise = makeExercise();

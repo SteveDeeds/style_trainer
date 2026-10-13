@@ -6,6 +6,7 @@ import {
   initialMasteryState,
   leafKey,
   loadMastery,
+  qualifiesForDetailedMastery,
   recordAdvancementToMastery,
   recordLoopToMastery,
   registerStyleCatalog,
@@ -29,6 +30,18 @@ const contextFor = leaf => ({
   maxLevel: 4,
   score: 95,
   bpm: 110,
+});
+
+test('unlocking the top level is distinct from mastering the top level', () => {
+  assert.equal(qualifiesForDetailedMastery({
+    completedLevel: 3, maxLevel: 4, nextLevel: 4, nextSpeed: undefined,
+  }), false);
+  assert.equal(qualifiesForDetailedMastery({
+    completedLevel: 4, maxLevel: 4, nextLevel: 4, nextSpeed: undefined,
+  }), true);
+  assert.equal(qualifiesForDetailedMastery({
+    completedLevel: 4, maxLevel: 4, nextLevel: 4, nextSpeed: 100,
+  }), false);
 });
 
 test('v1 mastery migrates as legacy history without inventing detailed completion', () => {
