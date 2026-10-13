@@ -92,7 +92,7 @@ async function stageAssetsAndNotices() {
   const synthesizerPackage = path.join(root, 'node_modules', 'js-synthesizer');
   await requireVersion('js-synthesizer', '1.11.0');
   await requireVersion('vexflow', '4.2.5');
-  await requireVersion('vite', '6.4.4');
+  await requireVersion('vite', '6.4.3');
   await mkdir(synthDirectory, { recursive: true });
   if (await sha256(path.join(synthDirectory, 'fluid.js')) !== '8EDC335DA1728DBE6B8BB9978852300C35DDDD8EFDA2003AA85141533E4BB5EF') {
     fail('public FluidSynth runtime does not match the approved source rebuild');

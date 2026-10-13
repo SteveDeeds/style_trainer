@@ -34,5 +34,5 @@ and checksum, is `licenses/GeneralUser-GS-ATTRIBUTION.txt`.
 
 ## Build tooling
 
-**Vite 6.4.4** is used only to build this site and is not included as a runtime
+**Vite 6.4.3** is used only to build this site and is not included as a runtime
 bundle; its license is retained in `licenses/LICENSE-Vite.txt`.
