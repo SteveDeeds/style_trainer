@@ -341,7 +341,7 @@ const transport = new Transport({
     const advancement = progression.submitExercise(result.score, scoredExercise);
     if (advancement) {
       const leveledUp = progression.level > scoredExercise.level;
-      const isMastered = progression.level >= progression.maxLevel && !advancement.nextSpeed;
+      const isMastered = scoredExercise.level >= maxLevel && progression.level === maxLevel && !advancement.nextSpeed;
       transport.stop();
       if (advancement.nextSpeed) $('practice-speed').value = String(advancement.nextSpeed);
       exercise = makeExercise();

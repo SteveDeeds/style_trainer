@@ -131,6 +131,7 @@ test('only genuine mastered advancement marks a detailed leaf complete', () => {
   });
   let track = buildMasteryView(state).styles[0].sections[0].tracks[0];
   assert.equal(track.mastered, false);
+  assert.equal(track.highestLevel, 4);
   assert.equal(track.bestScore, 100);
 
   recordAdvancementToMastery(state, {
@@ -138,6 +139,25 @@ test('only genuine mastered advancement marks a detailed leaf complete', () => {
   });
   track = buildMasteryView(state).styles[0].sections[0].tracks[0];
   assert.equal(track.mastered, true);
+});
+
+test('practice-only loop scores do not unlock or replace the saved density level', () => {
+  const state = initialMasteryState();
+  const leaf = catalog.leaves[0];
+  registerStyleCatalog(state, catalog);
+
+  recordLoopToMastery(state, { ...contextFor(leaf), level: 4, score: 99, isPracticeOnly: true });
+  let track = buildMasteryView(state).styles[0].sections[0].tracks[0];
+  assert.equal(track.highestLevel, 0);
+  assert.equal(track.bestScore, 99);
+
+  recordAdvancementToMastery(state, {
+    ...contextFor(leaf), completedLevel: 1, newLevel: 2, isMastered: false,
+  });
+  recordLoopToMastery(state, { ...contextFor(leaf), level: 4, score: 100, isPracticeOnly: true });
+  track = buildMasteryView(state).styles[0].sections[0].tracks[0];
+  assert.equal(track.highestLevel, 2);
+  assert.equal(track.mastered, false);
 });
 
 test('unknown detailed context does not create malformed progress', () => {

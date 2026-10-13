@@ -273,7 +273,6 @@ export function recordLoopToMastery(state, {
 
   const detail = detailedLeaf(state, { styleName, ...context });
   if (detail) {
-    detail.progress.highestLevel = Math.max(detail.progress.highestLevel, level);
     if (score > detail.progress.bestScore) {
       detail.progress.bestScore = Math.round(score);
       detail.progress.bestBpm = Math.round(bpm);
