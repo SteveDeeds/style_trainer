@@ -54,7 +54,7 @@ export class Transport {
   }
   prepareScore(cycle, exercise) {
     if (this.mode === 'record' && (this.loop || cycle <= this.cycle)) {
-      const score = new LoopScore(exercise.groups, this.msPerTick, this.origin + cycle * this.duration);
+      const score = new LoopScore(exercise.groups, this.msPerTick, this.origin + cycle * this.duration, null, exercise.ppq);
       score.exercise = exercise;
       this.scores.set(cycle, score);
     }
@@ -80,7 +80,7 @@ export class Transport {
       }
       const heard = now - this.latencyMs;
       for (const [cycle, score] of this.scores) {
-        if (heard >= this.origin + (cycle + 1) * this.duration + TIMING_TOLERANCE_MS) {
+        if (heard >= this.origin + (cycle + 1) * this.duration + (score.halfTolerance ?? TIMING_TOLERANCE_MS)) {
           this.scores.delete(cycle);
           this.onResult(score.result(), cycle + 1, score.exercise, score.inputs);
           if (this.mode === 'stop') return;
@@ -140,8 +140,10 @@ export class Transport {
       this.activeNotes.clear();
       this.guide([]);
       if (!this.loop) {
-        if (this.mode === 'record') this.finishing = this.origin + (this.cycle + 1) * this.duration + TIMING_TOLERANCE_MS;
-        else this.stop();
+        if (this.mode === 'record') {
+          const halfTolerance = this.scores.get(this.cycle)?.halfTolerance ?? TIMING_TOLERANCE_MS;
+          this.finishing = this.origin + (this.cycle + 1) * this.duration + halfTolerance;
+        } else this.stop();
         return;
       }
       // Do not burst missed notes after the browser has throttled the timer.
@@ -177,10 +179,12 @@ export class Transport {
     }
     if (this.mode === 'record') {
       timestamp -= this.latencyMs;
-      this.feedback = timestamp < this.origin - TIMING_TOLERANCE_MS ? { reason: 'count-in', offsetMs: null, expectedPitches: [] } :
-        inputFeedback([...this.scores.values()].flatMap(score => score.expected), pitch, timestamp);
-      const candidates = [...this.scores.values()].flatMap(score =>
-        score.expected.filter(n => !n.hit && n.pitch === pitch && Math.abs(n.time - timestamp) <= TIMING_TOLERANCE_MS + 1e-7)
+      const activeScores = [...this.scores.values()];
+      const tolerance = activeScores[0]?.halfTolerance ?? TIMING_TOLERANCE_MS;
+      this.feedback = timestamp < this.origin - tolerance ? { reason: 'count-in', offsetMs: null, expectedPitches: [] } :
+        inputFeedback(activeScores.flatMap(score => score.expected), pitch, timestamp, tolerance);
+      const candidates = activeScores.flatMap(score =>
+        score.expected.filter(n => !n.hit && n.pitch === pitch && Math.abs(n.time - timestamp) <= (score.halfTolerance ?? TIMING_TOLERANCE_MS) + 1e-7)
           .map(note => ({ score, note })));
       const match = candidates.sort((a, b) => Math.abs(a.note.time - timestamp) - Math.abs(b.note.time - timestamp))[0];
       if (match) {
@@ -189,7 +193,7 @@ export class Transport {
       }
       const cycle = Math.floor((timestamp - this.origin) / this.duration);
       this.scores.get(cycle)?.input(pitch, timestamp);
-      return timestamp < this.origin - TIMING_TOLERANCE_MS ? null : false;
+      return timestamp < this.origin - tolerance ? null : false;
     }
     return null;
   }

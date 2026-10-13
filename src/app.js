@@ -10,6 +10,7 @@ import { sourceHarmony } from './yamaha.js';
 import { assetUrl } from './assets.js';
 import { clearSavedSounds, downloadSounds, readSavedSounds, saveSounds, validateStarter } from './soundfont-cache.js';
 import { folderPermission, forgetStyleFolder, readStyleEntry, readStyleFolder, saveStyleFolder, scanStyleFolder, stylesFromFiles } from './style-folder.js';
+import { evaluateTrophies, loadMastery, recordAdvancementToMastery, recordLoopToMastery, saveMastery, TROPHIES } from './mastery.js';
 
 const icons = {
   play: '<path d="m8 5 11 7-11 7Z"/>',
@@ -23,7 +24,7 @@ const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name]}
 document.querySelector('#app').innerHTML = `
   <header class="site-header">
     <a class="brand" href="./" aria-label="Style Trainer home"><span class="brand-mark">≋</span><span>style<span class="brand-light">trainer</span><small>FIND YOUR GROOVE</small></span></a>
-    <div class="header-actions"><button id="open-style" class="header-button" aria-haspopup="dialog">Change style</button><button id="open-devices" class="header-button" aria-haspopup="dialog">Devices & audio <span id="device-summary" class="readiness"></span></button><button id="help" class="help-button" aria-label="Open practice guide">?</button></div>
+    <div class="header-actions"><button id="open-mastery" class="header-button" aria-haspopup="dialog">🏆 Mastery & Trophies <span id="trophy-count-badge" class="readiness"></span></button><button id="open-style" class="header-button" aria-haspopup="dialog">Change style</button><button id="open-devices" class="header-button" aria-haspopup="dialog">Devices & audio <span id="device-summary" class="readiness"></span></button><button id="help" class="help-button" aria-label="Open practice guide">?</button></div>
   </header>
   <main>
     <section class="style-strip" aria-label="Exercise settings">
@@ -114,10 +115,34 @@ document.querySelector('#app').innerHTML = `
     <p>One chord per bar. Changing harmony resets the streak, not unlocked levels. Full-pattern randomized exercises qualify for speed and level advancement.</p>
   </section>
   <footer class="transport-shell"><div class="transport-inner"><span id="transport-caption" class="transport-caption">Start with a little listening.</span><nav class="transport" aria-label="Transport and practice modes"><button id="play" class="mode-button play-button" aria-pressed="false">${icon('play')}<span>PLAY<small>Listen</small></span></button><button id="step" class="mode-button" aria-pressed="false">${icon('step')}<span>STEP<small>Wait for notes</small></span></button><button id="record" class="mode-button record-button" aria-pressed="false">${icon('record')}<span>RECORD<small>Test yourself</small></span></button><button id="stop" class="mode-button stop-button" aria-pressed="true">${icon('stop')}<span>STOP<small>Reset</small></span></button><button id="loop" class="loop-button" aria-pressed="true">${icon('loop')}<span>LOOP: ON</span></button></nav><label class="volume-label">Volume <input id="volume" type="range" min="0" max="100" value="65" aria-label="Volume"></label></div></footer>
+  <dialog id="mastery-dialog" class="setup-drawer" aria-labelledby="mastery-dialog-title">
+    <div class="dialog-heading"><h2 id="mastery-dialog-title">Style Mastery & Trophies</h2><button data-close="mastery-dialog" aria-label="Close mastery and trophies">×</button></div>
+    <p class="drawer-notice" data-notice role="status"></p>
+    <div class="mastery-overview">
+      <div class="mastery-stat-card"><span class="stat-number" id="mastery-stat-mastered">0</span><span class="stat-label">Styles Mastered</span></div>
+      <div class="mastery-stat-card"><span class="stat-number" id="mastery-stat-trophies">0</span><span class="stat-label">Trophies</span></div>
+      <div class="mastery-stat-card"><span class="stat-number" id="mastery-stat-flawless">0</span><span class="stat-label">100% Loops</span></div>
+    </div>
+    <section class="mastery-section">
+      <div class="mastery-section-header">
+        <h3>Style Mastery</h3>
+        <span class="mastery-subtitle">Highest level completed & 100% flawless awards</span>
+      </div>
+      <div id="mastery-styles-list" class="mastery-styles-list"></div>
+    </section>
+    <section class="mastery-section">
+      <div class="mastery-section-header">
+        <h3>Trophy Case</h3>
+        <span class="mastery-subtitle">Milestones & secret achievements</span>
+      </div>
+      <div id="trophies-grid" class="trophies-grid"></div>
+    </section>
+  </dialog>
   <dialog id="help-dialog"><div class="dialog-heading"><h2>Find your groove.</h2><button id="close-help" aria-label="Close practice guide">×</button></div>
     <p><b>Play</b> loops the target arrangement and lights MIDI notes. <b>Step</b> freezes at each target onset until you play the pitches. Hold melodic shapes together; drum hits can be tapped in sequence. <b>Record</b> gives a one-bar count-in, mutes your target part, and scores each loop.</p>
-    <p>Timing is measured within <b>±${TIMING_TOLERANCE_MS} ms</b> using MIDI event timestamps. Wrong and extra notes count against you. Score at least <b>90% on three consecutive full-pattern loops at normal tempo</b> to stop automatically, hear congratulations, and unlock the next layer. Press a transport button when ready to continue.</p>
-    <p><b>Range</b> lets you drill any individual bar. At full-pattern settings and the original base BPM, <b>Speed</b> advances through 50% → 75% → 100% after three consecutive Record loops at 90%+. Each achievement stops and celebrates; start again when ready. At 100%, the same streak passes the density level. Single-bar drills, 25%/90% speeds and a lowered base BPM remain practice-only.</p>
+    <p>Timing accuracy uses musical subdivision tolerances: hits within <b>±1/32 note</b> receive a perfect score (1.0 credit). Hits within <b>±1/16 note</b> receive half score (0.5 credit). Notes worse than ±1/16 note receive no credit and count as extra notes. Wrong pitches count against you. Achieve a <b>rolling average of 90% or higher across the last three recorded loops</b> to advance to the next level or increase speed! A flawless 100% loop triggers an arpeggiated fanfare and awards stars and crowns in your Trophy Case.</p>
+    <p><b>Mastery & Trophies</b> tracks your highest level completed for each musical style, crowns flawless 100% runs, and unlocks trophies for milestones and secret groove achievements.</p>
+    <p><b>Range</b> lets you drill any individual bar. At full-pattern settings and the original base BPM, <b>Speed</b> advances through 50% → 75% → 100% after achieving a 90%+ average over three loops. Each achievement stops and celebrates; start again when ready. At 100%, the same streak passes the density level. Single-bar drills, 25%/90% speeds and a lowered base BPM remain practice-only.</p>
     <p>The score emphasizes <b>note attacks</b>: short release rests can become a longer note, with a staccato dot for clearly short articulation. Meaningful rests remain. Ties are reserved for beat/bar boundaries; no automatic tenuto or legato is inferred. Audio and scoring retain source timing.</p>
     <p><b>Change style</b> opens the local library, import and demo controls. <b>Devices & audio</b> contains MIDI ports, SoundFont loading, Preview synth, click sound and diagnostics. <b>Chord progression</b> offers key selection, randomization and restore. Enable <b>On-screen keys</b> for playable pads; MIDI works with them hidden. Click a level indicator while stopped to inspect any density.</p>
     <p>Files are processed locally. Yamaha CASM source chords, NTR/NTT rules, guitar-tuning voicing, pitch limits and RTR note actions guide randomized-harmony playback; ordinary MIDI uses inferred harmony. Guitar voicing is an approximation, not Yamaha firmware's proprietary generator. NOTE GENERATOR RTR requires style-specific data not carried by the imported MIDI and is reported as unsupported. Pitch-shift RTR uses one synth channel per sustained voice and reports exhaustion. Tempo is fixed to the selected BPM. Notation quantizes to sixteenths; scoring uses original timing.</p>
@@ -130,6 +155,7 @@ const $ = id => document.getElementById(id);
 const audio = new AudioEngine();
 let style = createDemo();
 let progression = new Progression(4);
+let mastery = loadMastery();
 let exercise;
 let randomizedHarmony = null;
 let busy = false;
@@ -280,9 +306,29 @@ const transport = new Transport({
     history.push({ ...result, loop, level: scoredExercise.level, inputs, practiceOnly: scoredExercise.practiceOnly, speed: scoredExercise.practiceSpeed, tempoEligible: scoredExercise.nextSpeed != null });
     history = history.slice(-6);
     $('calibrate-latency').disabled = medianTimingOffset(inputs) === null;
+
+    if (result.score >= 100) {
+      audio.perfectFanfare();
+    }
+
+    const maxLevel = trackLayers().length;
+    const loopRes = recordLoopToMastery(mastery, {
+      styleName: style.name,
+      category: style.category || (style.demo ? 'Demo Style' : 'Imported Style'),
+      level: scoredExercise.level,
+      maxLevel,
+      score: result.score,
+      bpm: Number($('bpm').value),
+      isPracticeOnly: Boolean(scoredExercise.practiceOnly),
+    });
+    mastery = loopRes.mastery;
+    saveMastery(mastery);
+    const unlockedTrophies = [...loopRes.unlocked];
+
     const advancement = progression.submitExercise(result.score, scoredExercise);
     if (advancement) {
       const leveledUp = progression.level > scoredExercise.level;
+      const isMastered = progression.level >= progression.maxLevel && !advancement.nextSpeed;
       transport.stop();
       if (advancement.nextSpeed) $('practice-speed').value = String(advancement.nextSpeed);
       exercise = makeExercise();
@@ -290,10 +336,40 @@ const transport = new Transport({
       lastPadKey = '';
       updateDensity();
       updateExerciseDescription();
-      audio.celebrate();
-      notify(advancement.nextSpeed ? `Congratulations! Three consecutive loops at 90% or higher at ${scoredExercise.practiceSpeed}%. Speed increased to ${advancement.nextSpeed}% at level ${progression.level} — press Play, Step or Record when ready.` :
-        leveledUp ? `Congratulations! Three consecutive loops at 90% or higher. Level ${progression.level} unlocked — press Play, Step or Record when ready.` :
-        'Congratulations! Three consecutive loops at 90% or higher on the top level. Pattern mastered!');
+      if (result.score < 100) {
+        audio.celebrate();
+      }
+
+      const advRes = recordAdvancementToMastery(mastery, {
+        styleName: style.name,
+        category: style.category || (style.demo ? 'Demo Style' : 'Imported Style'),
+        completedLevel: scoredExercise.level,
+        newLevel: progression.level,
+        maxLevel,
+        isMastered,
+        speedLadderGraduated: Boolean(advancement.nextSpeed === null && scoredExercise.practiceSpeed >= 100),
+        randomHarmonyQualified: Boolean(scoredExercise.randomized && scoredExercise.bars >= 4 && scoredExercise.practiceSpeed >= 100),
+        score: result.score,
+        bpm: Number($('bpm').value),
+      });
+      mastery = advRes.mastery;
+      saveMastery(mastery);
+      unlockedTrophies.push(...advRes.unlocked);
+
+      notify(advancement.nextSpeed ? `Congratulations! Rolling 3-loop average reached 90% or higher at ${scoredExercise.practiceSpeed}%. Speed increased to ${advancement.nextSpeed}% at level ${progression.level} — press Play, Step or Record when ready.` :
+        leveledUp ? `Congratulations! Rolling 3-loop average reached 90% or higher. Level ${progression.level} unlocked — press Play, Step or Record when ready.` :
+        'Congratulations! Rolling 3-loop average reached 90% or higher on the top level. Pattern mastered!');
+    }
+
+    if (unlockedTrophies.length > 0) {
+      const uniqueUnlocked = [...new Map(unlockedTrophies.map(t => [t.id, t])).values()];
+      const names = uniqueUnlocked.map(t => `${t.icon} ${t.title}`).join(', ');
+      notify(`🏆 Trophy unlocked: ${names}!`);
+    }
+
+    updateMasteryBadge();
+    if ($('mastery-dialog')?.open) {
+      renderMasteryDialog();
     }
     updateProgress();
   },
@@ -447,24 +523,33 @@ function updateProgress() {
     if (pitchMisses) details.push(`${pitchMisses} wrong-pitch presses — check your Launchpad layout/octave`);
     if (timingMisses.length) {
       const median = timingMisses.map(input => input.feedback.offsetMs).sort((a, b) => a - b)[Math.floor(timingMisses.length / 2)];
-      details.push(`${timingMisses.length} outside ±${TIMING_TOLERANCE_MS} ms (median ${Math.round(Math.abs(median))} ms ${median < 0 ? 'early' : 'late'})`);
+      details.push(`${timingMisses.length} timing misses (median ${Math.round(Math.abs(median))} ms ${median < 0 ? 'early' : 'late'})`);
     }
     if (duplicates) details.push(`${duplicates} repeated presses`);
     $('score-diagnostic').textContent = details.join(' · ');
   }
-  $('streak-label').textContent = exercise?.nextSpeed != null ? `${progression.streak} / 3 qualifying loops · 90% to increase speed to ${exercise.nextSpeed}%` :
+  const avg = Math.round(progression.average);
+  const count = progression.streak;
+  const avgText = count > 0 ? `Avg: ${avg}% (${count}/3 loops)` : '0/3 loops';
+  $('streak-label').textContent = exercise?.nextSpeed != null ? `${avgText} · 90%+ avg to increase speed to ${exercise.nextSpeed}%` :
     exercise?.practiceOnly ? 'Practice only — these scores do not count toward level-up' :
-    `${progression.streak} / 3 qualifying loops · 90% to ${progression.level === progression.maxLevel ? 'master this pattern' : 'advance'}`;
+    `${avgText} · 90%+ avg to ${progression.level === progression.maxLevel ? 'master this pattern' : 'advance'}`;
   $('streak').replaceChildren(...Array.from({ length: 3 }, (_, i) => {
     const dot = document.createElement('i');
-    dot.className = i < progression.streak ? 'filled' : '';
+    if (i < progression.scores.length) {
+      const score = progression.scores[i];
+      dot.className = score >= 90 ? 'filled pass' : 'filled';
+      if (score >= 100) dot.classList.add('perfect');
+      dot.title = `Loop ${i + 1}: ${Math.round(score)}%`;
+    }
     return dot;
   }));
   $('score-history').replaceChildren(...history.map(r => {
     const span = document.createElement('span');
-    span.textContent = `${Math.round(r.score)}%${r.tempoEligible ? ` · ${r.speed}% speed` : r.practiceOnly ? ' · drill' : ''}`;
+    span.textContent = `${Math.round(r.score)}%${r.score >= 100 ? ' ⭐' : ''}${r.tempoEligible ? ` · ${r.speed}% speed` : r.practiceOnly ? ' · drill' : ''}`;
     span.title = `Loop ${r.loop}: ${r.hits} of ${r.total}, ${r.extra} extra`;
-    if (r.score >= 90) span.className = 'pass';
+    if (r.score >= 100) span.className = 'pass perfect';
+    else if (r.score >= 90) span.className = 'pass';
     return span;
   }));
 }
@@ -1249,7 +1334,7 @@ $('help-dialog').addEventListener('keydown', event => {
   if (event.key === 'Escape') { event.preventDefault(); $('help-dialog').close(); }
 });
 $('help-dialog').addEventListener('close', () => $('help').focus());
-for (const [triggerId, dialogId] of [['open-style', 'style-dialog'], ['open-devices', 'devices-dialog']]) {
+for (const [triggerId, dialogId] of [['open-style', 'style-dialog'], ['open-devices', 'devices-dialog'], ['open-mastery', 'mastery-dialog']]) {
   const trigger = $(triggerId);
   const dialog = $(dialogId);
   trigger.setAttribute('aria-controls', dialogId);
@@ -1259,6 +1344,7 @@ for (const [triggerId, dialogId] of [['open-style', 'style-dialog'], ['open-devi
     for (const other of document.querySelectorAll('.setup-drawer[open]')) other.close();
     if ($('harmony-popover').matches(':popover-open')) $('harmony-popover').hidePopover();
     if (dialogId === 'devices-dialog') updateLatency();
+    if (dialogId === 'mastery-dialog') renderMasteryDialog();
     releaseInputs();
     dialog.show();
     trigger.setAttribute('aria-expanded', 'true');
@@ -1361,14 +1447,115 @@ function animate() {
       $('mode-description').textContent = `Count-in · ${remaining}`;
       const countBeat = (exercise.meter.numerator - remaining) % exercise.meter.numerator;
       [...$('beat-dots').children].forEach((dot, i) => dot.classList.toggle('active', countBeat === i));
-    } else if (transport.mode === 'record') $('mode-description').textContent = `Target muted · ±${TIMING_TOLERANCE_MS} ms timing window`;
+    } else if (transport.mode === 'record') $('mode-description').textContent = 'Target muted · ±1/32 perfect, ±1/16 half score';
     updatePads();
     updatePiano();
   }
   requestAnimationFrame(animate);
 }
+
+function updateMasteryBadge() {
+  const trophyKeys = Object.keys(mastery.trophies || {});
+  const unlockedCount = trophyKeys.length;
+  const badge = $('trophy-count-badge');
+  if (badge) {
+    badge.textContent = unlockedCount ? `${unlockedCount} 🏆` : '';
+    $('open-mastery').title = `${unlockedCount} / ${TROPHIES.length} Trophies Unlocked`;
+  }
+}
+
+function renderMasteryDialog() {
+  const styles = Object.values(mastery.styles || {});
+  const masteredCount = styles.filter(s => s.mastered).length;
+  const trophyKeys = Object.keys(mastery.trophies || {});
+  const trophyCount = trophyKeys.length;
+  const total100Count = mastery.stats?.total100Loops || 0;
+
+  $('mastery-stat-mastered').textContent = `${masteredCount} / ${Math.max(styles.length, 1)}`;
+  $('mastery-stat-trophies').textContent = `${trophyCount} / ${TROPHIES.length}`;
+  $('mastery-stat-flawless').textContent = String(total100Count);
+
+  const currentName = style?.name || 'Current Style';
+  const displayStyles = [...styles];
+  if (!displayStyles.some(s => s.name === currentName)) {
+    displayStyles.unshift({
+      name: currentName,
+      category: style?.category || (style?.demo ? 'Demo Style' : 'Local Style'),
+      highestLevel: 0,
+      maxLevel: trackLayers().length,
+      mastered: false,
+      has100OnHighest: false,
+      hasEver100: false,
+      bestScore: 0,
+      bestBpm: 0,
+    });
+  }
+
+  const stylesList = $('mastery-styles-list');
+  stylesList.replaceChildren(...displayStyles.map(s => {
+    const item = document.createElement('div');
+    item.className = `mastery-style-item ${s.mastered ? 'mastered' : ''}`;
+
+    const isCurrent = s.name === style?.name;
+    const statusIcon = s.mastered ? '🏆' : s.highestLevel > 0 ? '🎵' : '⏳';
+    const levelText = s.mastered ? 'Mastered' : s.highestLevel > 0 ? `Level ${s.highestLevel} / ${s.maxLevel || 4}` : 'Not started';
+
+    let awardBadge = '';
+    if (s.has100OnHighest && s.mastered) {
+      awardBadge = '<span class="award-pill crown" title="Flawless 100% on Master level!">👑 Flawless Master</span>';
+    } else if (s.has100OnHighest) {
+      awardBadge = `<span class="award-pill star" title="Flawless 100% on Level ${s.highestLevel}!">⭐ 100% Star</span>`;
+    } else if (s.hasEver100) {
+      awardBadge = '<span class="award-pill star" title="Achieved 100% on a previous level">⭐ 100% Star</span>';
+    }
+
+    const metaParts = [s.category || 'Style'];
+    if (s.bestScore > 0) metaParts.push(`Best ${s.bestScore}%${s.bestBpm ? ` @ ${s.bestBpm} BPM` : ''}`);
+
+    item.innerHTML = `
+      <div class="style-item-header">
+        <div class="style-item-info">
+          <span class="style-item-title">${s.name} ${isCurrent ? '<small class="current-tag">CURRENT</small>' : ''}</span>
+          <span class="style-item-meta">${metaParts.join(' · ')}</span>
+        </div>
+        <div class="style-item-awards">
+          ${awardBadge}
+          <span class="level-pill ${s.mastered ? 'mastered' : ''}">${statusIcon} ${levelText}</span>
+        </div>
+      </div>
+    `;
+    return item;
+  }));
+
+  const grid = $('trophies-grid');
+  grid.replaceChildren(...TROPHIES.map(trophy => {
+    const isUnlocked = Boolean(mastery.trophies?.[trophy.id]);
+    const card = document.createElement('div');
+    card.className = `trophy-card ${isUnlocked ? 'unlocked' : 'locked'} ${trophy.category === 'Secret' ? 'secret' : ''}`;
+
+    const icon = isUnlocked ? trophy.icon : '🔒';
+    const title = !isUnlocked && trophy.category === 'Secret' ? 'Secret Award' : trophy.title;
+    const desc = !isUnlocked && trophy.category === 'Secret' ? (trophy.secretHint || 'Keep grooving to discover this hidden trophy.') : trophy.description;
+    const badgeText = isUnlocked ? 'Unlocked' : trophy.category;
+    const badgeClass = isUnlocked ? 'badge-unlocked' : trophy.category === 'Secret' ? 'badge-secret' : 'badge-locked';
+
+    card.innerHTML = `
+      <span class="trophy-card-icon">${icon}</span>
+      <div class="trophy-card-content">
+        <div class="trophy-card-header">
+          <strong class="trophy-card-title">${title}</strong>
+          <span class="trophy-badge ${badgeClass}">${badgeText}</span>
+        </div>
+        <p class="trophy-card-desc">${desc}</p>
+      </div>
+    `;
+    return card;
+  }));
+}
+
 setStyle(style);
 libraryReady = loadLibrary();
 void libraryReady.then(restoreFolderOnVisit);
 updateDevices();
+updateMasteryBadge();
 animate();

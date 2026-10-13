@@ -322,29 +322,44 @@ export function targetGroupAt(groups, tick, toleranceTicks = 0) {
 }
 
 export class LoopScore {
-  constructor(groups, millisecondsPerTick, startTime, tolerance = TIMING_TOLERANCE_MS) {
+  constructor(groups, millisecondsPerTick, startTime, tolerance = null, ppq = 480) {
     this.expected = groups.flatMap(g => g.pitches.map(pitch => ({
       pitch, time: startTime + g.tick * millisecondsPerTick, hit: false,
     })));
-    this.tolerance = tolerance;
+    if (tolerance === null || tolerance === undefined) {
+      this.perfectTolerance = (ppq / 8) * millisecondsPerTick;
+      this.halfTolerance = (ppq / 4) * millisecondsPerTick;
+    } else if (typeof tolerance === 'number') {
+      this.perfectTolerance = tolerance / 2;
+      this.halfTolerance = tolerance;
+    } else {
+      this.perfectTolerance = tolerance.perfect ?? tolerance.half / 2;
+      this.halfTolerance = tolerance.half ?? tolerance.perfect * 2;
+    }
+    this.tolerance = this.halfTolerance;
     this.extra = 0;
     this.inputs = [];
   }
   input(pitch, time) {
-    const candidates = this.expected.filter(n => !n.hit && n.pitch === pitch && Math.abs(n.time - time) <= this.tolerance + 1e-7);
+    const candidates = this.expected.filter(n => !n.hit && n.pitch === pitch && Math.abs(n.time - time) <= this.halfTolerance + 1e-7);
     const closest = candidates.sort((a, b) => Math.abs(a.time - time) - Math.abs(b.time - time))[0];
+    const offsetMs = closest ? time - closest.time : null;
+    const absOffset = closest ? Math.abs(offsetMs) : Infinity;
+    const credit = closest ? (absOffset <= this.perfectTolerance + 1e-7 ? 1 : 0.5) : 0;
     this.inputs.push({
-      pitch, time, matched: Boolean(closest), offsetMs: closest ? time - closest.time : null,
-      feedback: inputFeedback(this.expected, pitch, time, this.tolerance),
+      pitch, time, matched: Boolean(closest), credit, offsetMs,
+      feedback: inputFeedback(this.expected, pitch, time, this.halfTolerance),
     });
     if (!closest) { this.extra++; return false; }
     closest.hit = true;
+    closest.credit = credit;
     return true;
   }
   result() {
     const hits = this.expected.filter(n => n.hit).length;
+    const points = this.expected.reduce((sum, n) => sum + (n.hit ? (n.credit ?? 1) : 0), 0);
     const total = this.expected.length;
-    return { hits, total, extra: this.extra, score: total ? 100 * hits / (total + this.extra) : 0 };
+    return { hits, total, extra: this.extra, score: total ? 100 * points / (total + this.extra) : 0 };
   }
 }
 
@@ -353,12 +368,21 @@ export class Progression {
     this.level = 1;
     this.maxLevel = maxLevel;
     this.requiredStreak = requiredStreak;
-    this.streak = 0;
+    this.scores = [];
+  }
+  get streak() {
+    return this.scores.length;
+  }
+  set streak(val) {
+    if (val === 0) this.scores = [];
+  }
+  get average() {
+    return this.scores.length ? this.scores.reduce((a, b) => a + b, 0) / this.scores.length : 0;
   }
   selectLevel(level) {
     if (!Number.isInteger(level) || level < 1 || level > this.maxLevel) throw new Error('Select a level within this track’s density range.');
     this.level = level;
-    this.streak = 0;
+    this.scores = [];
   }
   submitExercise(score, exercise) {
     const nextSpeed = exercise.nextSpeed;
@@ -366,15 +390,18 @@ export class Progression {
     return nextSpeed != null ? { nextSpeed } : { level: this.level };
   }
   submit(score, level = this.level, eligible = true, advanceLevel = true) {
-    if (!eligible) { this.streak = 0; return false; }
+    if (!eligible) { this.scores = []; return false; }
     if (level !== this.level) return false;
-    this.streak = score >= 90 ? this.streak + 1 : 0;
-    if (this.streak >= this.requiredStreak) {
-      if (advanceLevel && this.level < this.maxLevel) this.level++;
-      this.streak = 0;
-      return true;
+    this.scores.push(score);
+    if (this.scores.length > this.requiredStreak) this.scores.shift();
+    if (this.scores.length >= this.requiredStreak) {
+      const avg = this.scores.reduce((sum, s) => sum + s, 0) / this.scores.length;
+      if (avg >= 90) {
+        if (advanceLevel && this.level < this.maxLevel) this.level++;
+        this.scores = [];
+        return true;
+      }
     }
-    this.streak = Math.min(this.streak, this.requiredStreak);
     return false;
   }
 }

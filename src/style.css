@@ -126,6 +126,8 @@ main { max-width: 1360px; margin: auto; padding: 8px 20px 110px; }
 #streak-label { margin-left: auto; font-size: 12px; }
 .streak i { width: 16px; height: 6px; background: #dce5e8; border-radius: 3px; }
 .streak i.filled { background: var(--teal); }
+.streak i.filled.pass { background: var(--teal); }
+.streak i.filled.perfect { background: #f59e0b; box-shadow: 0 0 6px #f59e0b88; }
 .practice-status { padding: 4px 16px 0; color: #006e5e; font-size: 11px; }
 .notation {
   margin: 8px 10px 10px; min-height: 180px; max-height: 520px;
@@ -164,6 +166,7 @@ main { max-width: 1360px; margin: auto; padding: 8px 20px 110px; }
 .score-history { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .score-history span { font-size: 11px; border-radius: 4px; background: #edf2f4; padding: 4px 8px; }
 .score-history span.pass { background: #e3f4ed; color: #006e5e; }
+.score-history span.perfect { background: #fef3c7; color: #92400e; font-weight: 700; border: 1px solid #fcd34d; }
 .score-diagnostic { font-size: 12px; line-height: 1.6; margin-top: 8px; }
 .controller-card { border: 1px solid var(--border); border-radius: 7px; padding: 12px; margin-top: 10px; background: #fff; }
 .controller-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12px; margin: 10px 0; }
@@ -223,6 +226,57 @@ dialog p, .harmony-popover p { font-size: 13px; line-height: 1.65; margin-top: 1
 .setup-drawer > label, .harmony-popover > label { display: flex; flex-direction: column; gap: 6px; margin: 16px 0; font-size: 13px; }
 .drawer-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 .harmony-popover { width: 400px; inset: 64px 0 auto; margin: 0 auto; max-height: calc(100dvh - 180px); }
+
+/* Mastery & Trophies Drawer */
+#mastery-dialog { width: min(520px, calc(100vw - 32px)); }
+.mastery-overview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0; }
+.mastery-stat-card {
+  background: #f4f7f9; border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 8px; text-align: center; display: flex; flex-direction: column; gap: 2px;
+}
+.stat-number { font: 800 20px 'Manrope', sans-serif; color: var(--teal); }
+.stat-label { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.mastery-section { margin-top: 18px; }
+.mastery-section-header { margin-bottom: 10px; }
+.mastery-section-header h3 { font: 800 15px 'Manrope', sans-serif; color: #101b2c; margin: 0; }
+.mastery-subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; display: block; }
+.mastery-styles-list { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; padding-right: 4px; }
+.mastery-empty { background: #f9fafb; border: 1px dashed var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+.mastery-empty p { font-size: 12px; color: var(--muted); margin: 0; }
+.mastery-style-item {
+  background: #fff; border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; transition: border-color .2s, background .2s;
+}
+.mastery-style-item.mastered { border-color: #aee6d7; background: #f9fdfc; }
+.style-item-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.style-item-info { display: flex; flex-direction: column; gap: 2px; }
+.style-item-title { font: 700 13px 'Manrope', sans-serif; color: #101b2c; display: flex; align-items: center; gap: 6px; }
+.current-tag { font-size: 9px; font-weight: 700; background: #e6f6f3; color: var(--teal); padding: 1px 5px; border-radius: 4px; }
+.style-item-meta { font-size: 11px; color: var(--muted); }
+.style-item-awards { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.level-pill { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 12px; background: #edf2f7; color: #334e68; }
+.level-pill.mastered { background: #e6f6f3; color: #006e5e; border: 1px solid #aee6d7; }
+.award-pill { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 12px; }
+.award-pill.crown { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+.award-pill.star { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.trophies-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; max-height: 280px; overflow-y: auto; padding-right: 4px; }
+.trophy-card {
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.trophy-card.locked { background: #f9fafb; opacity: .72; }
+.trophy-card.unlocked { background: #fff; border-color: #aee6d7; box-shadow: 0 2px 6px #008d7812; }
+.trophy-card-icon { font-size: 22px; line-height: 1; }
+.trophy-card-content { flex: 1; min-width: 0; }
+.trophy-card-header { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 3px; }
+.trophy-card-title { font: 700 12px 'Manrope', sans-serif; color: #101b2c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trophy-card.unlocked .trophy-card-title { color: #006e5e; }
+.trophy-card-desc { font-size: 11px; line-height: 1.35; color: var(--muted); margin: 0; }
+.trophy-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; white-space: nowrap; }
+.badge-unlocked { background: #d4f4eb; color: #006e5e; }
+.badge-locked { background: #e9eef2; color: #6b7c8d; }
+.badge-secret { background: #f5eefc; color: #773dbd; }
+
 @media (max-width: 1000px) {
   .workspace { grid-template-columns: 1fr; }
   .style-strip { gap: 10px 14px; }

@@ -76,6 +76,29 @@ export class AudioEngine {
     oscillator.start();
     oscillator.stop(this.context.currentTime + .05);
   }
+  perfectFanfare() {
+    if (!this.context) return;
+    [72, 76, 79, 84, 88].forEach((pitch, index) => {
+      const start = this.context.currentTime + index * 0.08;
+      const oscillator = this.context.createOscillator();
+      const gain = this.context.createGain();
+      oscillator.type = 'triangle';
+      oscillator.frequency.value = 440 * 2 ** ((pitch - 69) / 12);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.22, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.55);
+      oscillator.connect(gain);
+      gain.connect(this.gain);
+      this.celebrationVoices.add(oscillator);
+      oscillator.onended = () => {
+        this.celebrationVoices.delete(oscillator);
+        oscillator.disconnect();
+        gain.disconnect();
+      };
+      oscillator.start(start);
+      oscillator.stop(start + 0.58);
+    });
+  }
   celebrate() {
     if (!this.context) throw new Error('Audio must be initialized before playing the congratulations sound.');
     [60, 64, 67, 72].forEach((pitch, index) => {

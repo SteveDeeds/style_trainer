@@ -5,6 +5,7 @@ import { buildExercise, buildStylePreview, groupNotes, inferChord, initialHarmon
 import { Transport } from '../src/transport.js';
 import { MidiController, preferredMidiPort } from '../src/controller.js';
 import { AudioEngine, monitorNote } from '../src/audio.js';
+import { loadMastery, saveMastery, recordLoopToMastery, recordAdvancementToMastery, evaluateTrophies, TROPHIES } from '../src/mastery.js';
 
 test('style preview uses four full-density bars of C G Am F with untransposed drums', () => {
   const style = createDemo();
@@ -284,17 +285,23 @@ test('speed ladder excludes single-bar drills, lowered header tempo and manual 2
     assert.equal(exercise.nextSpeed, null);
   }
 });
-test('failed tempo loops reset streak; stale density results cannot advance speed; top level still masters at 100%', () => {
+test('rolling average progression tracks up to 3 loops; level change resets streak; top level masters', () => {
   const full = buildExercise(createDemo(), { trackId: '1:1' });
   const progression = new Progression(4);
   const slow = practiceExercise(full, { bpm: 96, normalBpm: 96, speed: 50 });
   progression.submitExercise(100, slow);
   progression.submitExercise(89.99, slow);
-  assert.equal(progression.streak, 0);
+  assert.equal(progression.streak, 2);
+  // An average < 90 across 3 loops does not advance
+  progression.submitExercise(70, slow);
+  assert.equal(progression.streak, 3);
+  assert.ok(progression.average < 90);
   progression.selectLevel(4);
+  assert.equal(progression.streak, 0); // selectLevel resets streak
   assert.equal(progression.submitExercise(100, slow), null);
   assert.equal(progression.streak, 0);
   const top = practiceExercise(buildExercise(createDemo(), { trackId: '1:1', level: 4 }), { bpm: 96, normalBpm: 96 });
+  progression.selectLevel(4); // resets streak
   progression.submitExercise(90, top);
   progression.submitExercise(90, top);
   assert.deepEqual(progression.submitExercise(90, top), { level: 4 });
@@ -734,13 +741,21 @@ test('missing parts yield an empty target, not invented quiz successes', () => {
   assert.equal(buildExercise(style, { focus: 'chords' }).target.length, 0);
   assert.equal(new LoopScore([], 1, 0).result().score, 0);
 });
-test('score accepts exact ±100 ms boundaries and rejects ±100.001 ms', () => {
-  for (const offset of [-100, -45, 45, 100]) {
+test('score awards 1.0 for ±1/32 note, 0.5 for ±1/16 note, and 0 beyond', () => {
+  // ppq = 480, msPerTick = 1:
+  // 1/32 note = 60 ms
+  // 1/16 note = 120 ms
+  for (const offset of [-60, -30, 0, 30, 60]) {
     const score = new LoopScore([{ tick: 100, pitches: [60] }], 1, 1000);
     assert.equal(score.input(60, 1100 + offset), true);
     assert.equal(score.result().score, 100);
   }
-  for (const offset of [-100.001, 100.001]) {
+  for (const offset of [-120, -90, 90, 120]) {
+    const score = new LoopScore([{ tick: 100, pitches: [60] }], 1, 1000);
+    assert.equal(score.input(60, 1100 + offset), true);
+    assert.equal(score.result().score, 50);
+  }
+  for (const offset of [-120.001, 120.001]) {
     const score = new LoopScore([{ tick: 100, pitches: [60] }], 1, 1000);
     assert.equal(score.input(60, 1100 + offset), false);
     assert.equal(score.result().score, 0);
@@ -754,20 +769,20 @@ test('scoring matches each pitch once, penalizes extras and requires all chord n
   const result = score.result();
   assert.deepEqual(result, { hits: 2, total: 3, extra: 1, score: 50 });
   assert.deepEqual(score.inputs.map(({ feedback, ...input }) => input), [
-    { pitch: 60, time: 100, matched: true, offsetMs: 0 },
-    { pitch: 64, time: 100, matched: true, offsetMs: 0 },
-    { pitch: 60, time: 100, matched: false, offsetMs: null },
+    { pitch: 60, time: 100, matched: true, offsetMs: 0, credit: 1 },
+    { pitch: 64, time: 100, matched: true, offsetMs: 0, credit: 1 },
+    { pitch: 60, time: 100, matched: false, offsetMs: null, credit: 0 },
   ]);
   assert.equal(groupNotes([{ tick: 0, pitch: 60 }, { tick: 0, pitch: 60 }])[0].pitches.length, 1);
 });
 test('input feedback separates wrong layout pitches, timing misses and duplicates without relaxing scoring', () => {
   const score = new LoopScore([{ tick: 0, pitches: [36] }, { tick: 500, pitches: [36] }], 1, 1000);
-  assert.deepEqual(inputFeedback(score.expected, 60, 1000), { reason: 'pitch', offsetMs: null, expectedPitches: [36] });
+  assert.deepEqual(inputFeedback(score.expected, 60, 1000, score.halfTolerance), { reason: 'pitch', offsetMs: null, expectedPitches: [36] });
   assert.equal(score.input(60, 1000), false);
   assert.equal(score.inputs.at(-1).feedback.reason, 'pitch');
-  assert.equal(score.input(36, 1120), false);
+  assert.equal(score.input(36, 1150), false);
   assert.equal(score.inputs.at(-1).feedback.reason, 'timing');
-  assert.equal(score.inputs.at(-1).feedback.offsetMs, 120);
+  assert.equal(score.inputs.at(-1).feedback.offsetMs, 150);
   assert.equal(score.input(36, 965), true);
   assert.equal(score.inputs.at(-1).feedback.reason, 'hit');
   assert.equal(score.input(36, 1000), false);
@@ -781,14 +796,12 @@ test('displayed target keeps the current note during the valid late-hit window',
   assert.equal(targetGroupAt(groups, 490, 100), groups[1]);
   assert.equal(targetGroupAt([], 0, 100), null);
 });
-test('three consecutive 90% loops level up, failure breaks streak and maximum stays capped', () => {
+test('rolling average of 3 loops >= 90% levels up; sub-90% average does not level up', () => {
   const progression = new Progression(2);
   assert.equal(progression.submit(90), false);
-  progression.submit(89.99);
-  assert.equal(progression.streak, 0);
-  progression.submit(90);
-  progression.submit(100);
-  assert.equal(progression.submit(90), true);
+  assert.equal(progression.submit(85), false);
+  assert.equal(progression.streak, 2);
+  assert.equal(progression.submit(95), true);
   assert.equal(progression.level, 2);
   assert.equal(progression.streak, 0);
   for (let i = 0; i < 10; i++) progression.submit(100);
@@ -900,7 +913,7 @@ test('solo schedules only target notes in Play/Step and keeps Record targets mut
       if (mode === 'record') {
         assert.equal(h.transport.origin, 2000);
         for (const pitch of h.exercise.groups[0].pitches) h.transport.input(pitch, true, 2000);
-        h.advance(4100);
+        h.advance(4150);
         assert.equal(h.results.at(-1).score, 100);
       }
       h.transport.stop();
@@ -968,10 +981,10 @@ test('RECORD mutes target, scores late final hits after boundary and accepts ear
     assert.equal(h.transport.input(62, true, 3900), true, '100 ms early next-loop onset gets next-loop scorer');
     h.advance(4000);
     assert.equal(h.results.length, 0);
-    assert.equal(h.transport.input(60, true, 4079), true, 'final hit can arrive nearly 100 ms late after boundary');
-    h.advance(4099);
+    assert.equal(h.transport.input(60, true, 4010), true, 'final hit can arrive after boundary within perfect tolerance');
+    h.advance(4124);
     assert.equal(h.results.length, 0);
-    h.advance(4100);
+    h.advance(4130);
     assert.equal(h.results.length, 1);
     assert.equal(h.results[0].score, 100);
     assert.equal(h.played.length, 0);
@@ -986,9 +999,9 @@ test('RECORD with looping disabled waits the full scoring grace window then stop
     for (const pitch of h.exercise.groups[0].pitches) h.transport.input(pitch, true, 2000);
     h.advance(4000);
     assert.equal(h.transport.mode, 'record');
-    h.advance(4099);
+    h.advance(4124);
     assert.equal(h.transport.mode, 'record');
-    h.advance(4100);
+    h.advance(4130);
     assert.equal(h.results[0].score, 100);
     assert.equal(h.transport.mode, 'stop');
   } finally { h.transport.stop(); }
@@ -1030,7 +1043,7 @@ test('stopping from the third qualifying result prevents further transport event
       h.advance(origin);
       for (const pitch of h.exercise.groups[0].pitches) h.transport.input(pitch, true, origin);
       h.advance(origin + 2000);
-      h.advance(origin + 2100);
+      h.advance(origin + 2150);
     }
     assert.equal(progression.level, 2);
     assert.equal(celebrations, 1);
@@ -1070,3 +1083,110 @@ test('MIDI feedback uses native note messages and clears lit pads when changing 
   input.onmidimessage({ data: [0x80, 64, 0], timeStamp: 102 });
   assert.deepEqual(received.slice(1), [[60, true, 90, 100], [60, false, 0, 101], [64, false, 0, 102]]);
 });
+
+test('mastery tracking updates styles, highest levels, and 100% flawless distinctions', () => {
+  let mastery = loadMastery({ getItem: () => null });
+  assert.deepEqual(mastery.styles, {});
+  assert.deepEqual(mastery.trophies, {});
+
+  // Loop 1: 95% on Level 1
+  let res = recordLoopToMastery(mastery, {
+    styleName: 'Bebop Swing',
+    level: 1,
+    maxLevel: 4,
+    score: 95,
+    bpm: 120,
+    isPracticeOnly: false,
+  });
+  mastery = res.mastery;
+  assert.equal(mastery.styles['Bebop Swing'].highestLevel, 1);
+  assert.equal(mastery.styles['Bebop Swing'].bestScore, 95);
+  assert.equal(mastery.styles['Bebop Swing'].has100OnHighest, false);
+  assert.ok(res.unlocked.some(t => t.id === 'first-loop'));
+
+  // Loop 2: 100% on Level 1 -> gets 100% star and Century Club
+  res = recordLoopToMastery(mastery, {
+    styleName: 'Bebop Swing',
+    level: 1,
+    maxLevel: 4,
+    score: 100,
+    bpm: 120,
+    isPracticeOnly: false,
+  });
+  mastery = res.mastery;
+  assert.equal(mastery.styles['Bebop Swing'].has100OnHighest, true);
+  assert.equal(mastery.styles['Bebop Swing'].hasEver100, true);
+  assert.ok(res.unlocked.some(t => t.id === 'century-club'));
+
+  // Advancement to Level 2
+  res = recordAdvancementToMastery(mastery, {
+    styleName: 'Bebop Swing',
+    completedLevel: 1,
+    maxLevel: 4,
+    score: 96,
+    bpm: 120,
+  });
+  mastery = res.mastery;
+  assert.equal(mastery.styles['Bebop Swing'].highestLevel, 2);
+  // Now highest level is 2, and they haven't gotten 100% on level 2 yet
+  assert.equal(mastery.styles['Bebop Swing'].has100OnHighest, false);
+  assert.equal(mastery.styles['Bebop Swing'].hasEver100, true);
+
+  // Complete level 4 (Mastery of style)
+  for (let lvl = 2; lvl <= 4; lvl++) {
+    res = recordAdvancementToMastery(mastery, {
+      styleName: 'Bebop Swing',
+      completedLevel: lvl,
+      maxLevel: 4,
+      score: 100,
+      bpm: 120,
+    });
+    mastery = res.mastery;
+  }
+  assert.equal(mastery.styles['Bebop Swing'].highestLevel, 4);
+  assert.equal(mastery.styles['Bebop Swing'].has100OnHighest, true);
+  assert.ok(mastery.trophies['first-style-mastered']);
+  assert.ok(mastery.trophies['flawless-master']);
+});
+
+test('mastery evaluates milestones for multiple styles, speed, and secret awards', () => {
+  let mastery = loadMastery({ getItem: () => null });
+
+  // Fast loop at 170 BPM triggers Speed Demon
+  let res = recordLoopToMastery(mastery, {
+    styleName: 'Fast Bop',
+    level: 2,
+    maxLevel: 4,
+    score: 92,
+    bpm: 170,
+    isPracticeOnly: false,
+  });
+  mastery = res.mastery;
+  assert.ok(mastery.trophies['speed-demon']);
+
+  // Secret trophy: Midnight Pocket at 100%
+  res = recordLoopToMastery(mastery, {
+    styleName: 'Midnight Pocket',
+    level: 4,
+    maxLevel: 4,
+    score: 100,
+    bpm: 96,
+    isPracticeOnly: false,
+  });
+  mastery = res.mastery;
+  assert.ok(mastery.trophies['secret-midnight-pocket']);
+
+  // Master 5 styles
+  for (let i = 1; i <= 5; i++) {
+    recordAdvancementToMastery(mastery, {
+      styleName: `Style ${i}`,
+      completedLevel: 4,
+      maxLevel: 4,
+      score: 95,
+      bpm: 100,
+    });
+  }
+  evaluateTrophies(mastery);
+  assert.ok(mastery.trophies['five-styles-mastered']);
+});
+
