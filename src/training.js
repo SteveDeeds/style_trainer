@@ -55,6 +55,69 @@ function onMainBeat(tick, ppq, denominator) {
   return Math.abs(beat - Math.round(beat)) < .06;
 }
 
+export function drumNoteTier(note) {
+  if ([33, 35, 36].includes(note.pitch)) return 1;
+  if ([31, 37, 38, 40].includes(note.pitch)) return 2;
+  if ([42, 44, 46].includes(note.pitch)) return 3;
+  return 4;
+}
+
+export function pitchedNoteTier(note, root, ppq, denominator) {
+  const onBeat = onMainBeat(note.tick, ppq, denominator);
+  const isRoot = root !== undefined && note.pitch % 12 === root;
+  if (isRoot && onBeat) return 1;
+  if (isRoot) return 2;
+  if (onBeat) return 3;
+  return 4;
+}
+
+export function noteTier(note, root, ppq, denominator) {
+  if (note.part === 'drums') return drumNoteTier(note);
+  return pitchedNoteTier(note, root, ppq, denominator);
+}
+
+export function compareExerciseNotes(a, b, ppq, denominator) {
+  if (a.tier !== b.tier) return a.tier - b.tier;
+  const beatTicks = ppq * 4 / denominator;
+  const aDist = Math.min(a.tick % beatTicks, beatTicks - (a.tick % beatTicks)) / beatTicks;
+  const bDist = Math.min(b.tick % beatTicks, beatTicks - (b.tick % beatTicks)) / beatTicks;
+  if (Math.abs(aDist - bDist) > 0.01) return aDist - bDist;
+  const aInst = a.part === 'drums' ? ([33, 35, 36].includes(a.pitch) ? 0 : [31, 37, 38, 40].includes(a.pitch) ? 1 : [42, 44, 46].includes(a.pitch) ? 2 : 3) : (a.part === 'bass' ? 0 : 1);
+  const bInst = b.part === 'drums' ? ([33, 35, 36].includes(b.pitch) ? 0 : [31, 37, 38, 40].includes(b.pitch) ? 1 : [42, 44, 46].includes(b.pitch) ? 2 : 3) : (b.part === 'bass' ? 0 : 1);
+  if (aInst !== bInst) return aInst - bInst;
+  if (a.tick !== b.tick) return a.tick - b.tick;
+  if ((b.velocity ?? 100) !== (a.velocity ?? 100)) return (b.velocity ?? 100) - (a.velocity ?? 100);
+  return a.pitch - b.pitch;
+}
+
+export function barLevelQuotas(barNotes, ppq, denominator) {
+  const N = barNotes.length;
+  if (N === 0) return [0, 0, 0, 0];
+  const t1 = barNotes.filter(n => n.tier <= 1).length;
+  const t2 = barNotes.filter(n => n.tier <= 2).length;
+  const t3 = barNotes.filter(n => n.tier <= 3).length;
+
+  let k1 = Math.max(t1, 1);
+  if (t1 === 0) k1 = Math.max(1, Math.ceil(N * 0.25));
+  if (N >= 2 && k1 >= N) k1 = Math.min(N - 1, Math.max(1, Math.ceil(N * 0.25)));
+  k1 = Math.min(N, k1);
+
+  const minL2 = N >= 2 ? Math.max(k1 + (N > k1 ? 1 : 0), 2) : k1;
+  let k2 = Math.max(t2, minL2);
+  if (t2 <= k1) k2 = Math.max(minL2, Math.ceil(N * 0.50));
+  if (N >= 3 && k2 >= N) k2 = Math.min(N - 1, Math.max(minL2, Math.ceil(N * 0.50)));
+  k2 = Math.min(N, Math.max(k1, k2));
+
+  const minL3 = N >= 3 ? Math.max(k2 + (N > k2 ? 1 : 0), 3) : k2;
+  let k3 = Math.max(t3, minL3);
+  if (t3 <= k2) k3 = Math.max(minL3, Math.ceil(N * 0.75));
+  if (N >= 4 && k3 >= N) k3 = Math.min(N - 1, Math.max(minL3, Math.ceil(N * 0.75)));
+  k3 = Math.min(N, Math.max(k2, k3));
+
+  const k4 = N;
+  return [k1, k2, k3, k4];
+}
+
 function drumLayer(n, level) {
   if (level === 4) return true;
   if ([33, 35, 36].includes(n.pitch)) return true;
@@ -65,7 +128,7 @@ function drumLayer(n, level) {
 function pitchedLayer(note, level, root, ppq, denominator) {
   if (level === 4) return true;
   const onBeat = onMainBeat(note.tick, ppq, denominator);
-  const isRoot = note.pitch % 12 === root;
+  const isRoot = root !== undefined && note.pitch % 12 === root;
   return (isRoot && (onBeat || level >= 2)) || (onBeat && level >= 3);
 }
 
@@ -216,12 +279,19 @@ export function buildExercise(style, { section = 0, bars = 4, focus = 'full', le
     const fallbackRoot = chord?.root ??
       (bass.find(n => onMainBeat(n.tick, style.ppq, meter.denominator)) ?? bass[0])?.pitch % 12;
     const practiceNotes = selectedTrack ? inBar.filter(n => trackIdOf(n) === trackId) : inBar;
-    target.push(...practiceNotes.filter(note => {
-      if (focus !== 'full' && note.part !== focus) return false;
-      if (note.part === 'drums') return drumLayer(note, level);
-      const root = changes.filter(change => change.tick <= note.tick).at(-1)?.chord.root ?? note.yamaha?.sourceRoot ?? fallbackRoot;
-      return pitchedLayer(note, level, root, style.ppq, meter.denominator);
-    }));
+    const candidates = practiceNotes.filter(note => focus === 'full' || note.part === focus);
+    if (level === 4) {
+      target.push(...candidates);
+    } else {
+      const candidatesWithTier = candidates.map(note => {
+        const root = changes.filter(change => change.tick <= note.tick).at(-1)?.chord.root ?? note.yamaha?.sourceRoot ?? fallbackRoot;
+        return { ...note, tier: noteTier(note, root, style.ppq, meter.denominator) };
+      });
+      candidatesWithTier.sort((a, b) => compareExerciseNotes(a, b, style.ppq, meter.denominator));
+      const quotas = barLevelQuotas(candidatesWithTier, style.ppq, meter.denominator);
+      const count = quotas[level - 1];
+      target.push(...candidatesWithTier.slice(0, count).map(({ tier, ...note }) => note));
+    }
   }
   target.sort((a, b) => a.tick - b.tick || a.pitch - b.pitch);
   const selectedParts = focus === 'full' ? ['drums', 'bass', 'chords'] : [focus];

@@ -608,8 +608,8 @@ test('Yamaha kick and snare variants retain assigned pitches, kits and velocitie
 test('chord layers select source roots then other on-beat notes without generating fifths or triads', () => {
   const style = createDemo();
   assert.deepEqual(buildExercise(style, { focus: 'chords', level: 1, bars: 1 }).target.map(n => n.pitch), [60]);
-  assert.deepEqual(buildExercise(style, { focus: 'chords', level: 2, bars: 1 }).target.map(n => n.pitch), [60]);
-  assert.deepEqual(buildExercise(style, { focus: 'chords', level: 3, bars: 1 }).target.map(n => n.pitch), [60, 64, 67, 71]);
+  assert.deepEqual(buildExercise(style, { focus: 'chords', level: 2, bars: 1 }).target.map(n => n.pitch), [60, 64]);
+  assert.deepEqual(buildExercise(style, { focus: 'chords', level: 3, bars: 1 }).target.map(n => n.pitch), [60, 64, 67]);
   assert.deepEqual(buildExercise(style, { focus: 'chords', level: 4, bars: 1 }).target.map(n => n.pitch), [60, 64, 67, 71]);
   assert.equal(inferChord([{ pitch: 60 }, { pitch: 64 }, { pitch: 67 }, { pitch: 71 }]).name, 'Cmaj7');
 });
@@ -659,7 +659,8 @@ test('beat classification allows humanization without moving notes and follows t
     }));
     style.notes = source;
     assert.deepEqual(buildExercise(style, { focus: 'bass', bars: 1 }).target.map(n => n.tick), positions.slice(0, 2));
-    assert.deepEqual(buildExercise(style, { focus: 'bass', level: 2, bars: 1 }).target.map(n => n.tick), positions);
+    assert.deepEqual(buildExercise(style, { focus: 'bass', level: 2, bars: 1 }).target.map(n => n.tick), positions.slice(0, 3));
+    assert.deepEqual(buildExercise(style, { focus: 'bass', level: 4, bars: 1 }).target.map(n => n.tick), positions);
   }
 });
 test('sparse bass uses its on-beat root without treating off-beat approach notes as roots', () => {
@@ -727,13 +728,17 @@ test('invalid ranges and meter-changing exercise ranges fail explicitly', () => 
   assert.throws(() => buildExercise(style, { bars: 4 }), /time-signature/);
   assert.doesNotThrow(() => buildExercise(style, { bars: 1 }));
 });
-test('off-beat-only chords remain off-beat and do not invent a level-one target', () => {
+test('off-beat-only chords provide progressive targets without inventing artificial notes', () => {
   const style = createDemo();
   style.notes = style.notes.filter(n => n.channel === 2).map(n => ({ ...n, tick: n.tick + 240 }));
-  assert.equal(buildExercise(style, { focus: 'chords', bars: 1 }).target.length, 0);
+  const first = buildExercise(style, { focus: 'chords', bars: 1 });
+  assert.equal(first.target.length, 1);
+  assert.deepEqual(first.target.map(n => [n.tick, n.pitch]), [[240, 60]]);
   const second = buildExercise(style, { focus: 'chords', level: 2, bars: 1 });
-  assert.deepEqual(second.target.map(n => [n.tick, n.pitch]), [[240, 60]]);
+  assert.equal(second.target.length, 2);
   assert.equal(second.target[0].duration, 1680);
+  assert.equal(buildExercise(style, { focus: 'chords', level: 3, bars: 1 }).target.length, 3);
+  assert.equal(buildExercise(style, { focus: 'chords', level: 4, bars: 1 }).target.length, 4);
 });
 test('missing parts yield an empty target, not invented quiz successes', () => {
   const style = createDemo();
@@ -1189,4 +1194,70 @@ test('mastery evaluates milestones for multiple styles, speed, and secret awards
   evaluateTrophies(mastery);
   assert.ok(mastery.trophies['five-styles-mastered']);
 });
+
+test('four-level density guarantees bar minimums (L1 >= 1, L2 >= 2, L3 >= 3, L4 all) and strict nesting', () => {
+  const style = createDemo();
+  // 2 bars of multi-instrument backing with varying density
+  const noteKey = n => `${n.tick}:${n.track}:${n.channel}:${n.pitch}`;
+  for (const focus of ['drums', 'bass', 'chords', 'full']) {
+    const l1 = buildExercise(style, { focus, level: 1, bars: 2 });
+    const l2 = buildExercise(style, { focus, level: 2, bars: 2 });
+    const l3 = buildExercise(style, { focus, level: 3, bars: 2 });
+    const l4 = buildExercise(style, { focus, level: 4, bars: 2 });
+
+    const set1 = new Set(l1.target.map(noteKey));
+    const set2 = new Set(l2.target.map(noteKey));
+    const set3 = new Set(l3.target.map(noteKey));
+    const set4 = new Set(l4.target.map(noteKey));
+
+    // Strict nesting: L1 <= L2 <= L3 <= L4
+    for (const key of set1) assert.ok(set2.has(key), `${focus}: L1 note missing in L2`);
+    for (const key of set2) assert.ok(set3.has(key), `${focus}: L2 note missing in L3`);
+    for (const key of set3) assert.ok(set4.has(key), `${focus}: L3 note missing in L4`);
+
+    // Per-bar density minimums
+    for (let bar = 0; bar < 2; bar++) {
+      const s = bar * l4.barTicks;
+      const e = s + l4.barTicks;
+      const count4 = l4.target.filter(n => n.tick >= s && n.tick < e).length;
+      const count3 = l3.target.filter(n => n.tick >= s && n.tick < e).length;
+      const count2 = l2.target.filter(n => n.tick >= s && n.tick < e).length;
+      const count1 = l1.target.filter(n => n.tick >= s && n.tick < e).length;
+
+      if (count4 >= 1) assert.ok(count1 >= 1, `${focus} bar ${bar}: L1 should have at least 1 note`);
+      if (count4 >= 2) assert.ok(count2 >= 2, `${focus} bar ${bar}: L2 should have at least 2 notes`);
+      if (count4 >= 3) assert.ok(count3 >= 3, `${focus} bar ${bar}: L3 should have at least 3 notes`);
+      assert.equal(count4, l4.target.filter(n => n.tick >= s && n.tick < e).length);
+    }
+
+    // Strict progression when total source notes can support it
+    if (l4.target.length >= 4) {
+      assert.ok(l2.target.length > l1.target.length, `${focus}: L2 should have strictly more notes than L1`);
+      assert.ok(l3.target.length > l2.target.length, `${focus}: L3 should have strictly more notes than L2`);
+      assert.ok(l4.target.length > l3.target.length, `${focus}: L4 should have strictly more notes than L3`);
+    }
+  }
+});
+
+test('sparse styles with fewer than 3 notes clamp cleanly without throwing or fabricating notes', () => {
+  const style = createDemo();
+  // Bar with only 2 notes total
+  style.notes = [
+    { tick: 0, pitch: 36, duration: 60, channel: 1, track: 1, program: 33, velocity: 80 },
+    { tick: 480, pitch: 40, duration: 60, channel: 1, track: 1, program: 33, velocity: 80 },
+  ];
+  const l1 = buildExercise(style, { focus: 'bass', level: 1, bars: 1 });
+  const l2 = buildExercise(style, { focus: 'bass', level: 2, bars: 1 });
+  const l3 = buildExercise(style, { focus: 'bass', level: 3, bars: 1 });
+  const l4 = buildExercise(style, { focus: 'bass', level: 4, bars: 1 });
+
+  assert.equal(l1.target.length, 1);
+  assert.equal(l2.target.length, 2);
+  assert.equal(l3.target.length, 2);
+  assert.equal(l4.target.length, 2);
+  // Nesting holds even when clamped
+  assert.equal(l1.target[0].pitch, 36);
+  assert.deepEqual(l2.target.map(n => n.pitch), [36, 40]);
+});
+
 
