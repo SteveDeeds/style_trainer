@@ -277,8 +277,9 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
   chime, and unlock the next density layer. The next level is shown while stopped;
   start Play, Step, or Record when ready. At the top level the same streak stops
   and celebrates mastery without exceeding the maximum level.
-  Failed loops reset the streak. Changing style, track, or pattern length resets
-  progression; stopping or switching modes breaks the streak.
+  Failed loops reset the streak. Changing style, section, track, or pattern
+  length reloads that section/track's saved density and resets its qualifying
+  streak; stopping or switching modes also breaks the streak.
 - **Loop range** selects any one bar of the current 1–8-bar pattern, including
   the last bar. Notes and backing are clipped to that bar and repeated. Notes
   sustained across its starting boundary begin at the drill's start.
@@ -377,6 +378,9 @@ notation. Play/Step/Record/Stop/Loop and volume remain in the fixed bottom bar.
 - **Recent loops & scoring details** discloses score history and detailed
   rejection diagnostics. Current accuracy, input feedback, achievements and
   errors remain visible without opening it.
+- **Mastery & Trophies** opens a wide showcase with separate Style Mastery and
+  Trophy Case tabs. Expanding a style reveals its sections and each playable
+  instrument track without interrupting practice.
 
 Setup drawers are non-modal so Stop remains available. Close with their close
 button or Escape; focus returns to the opener. Harmony also supports Escape
@@ -384,6 +388,26 @@ and outside-click dismissal. The Help guide is a modal dialog. Opening setup
 does not stop playback, reset progress or request MIDI permission; existing
 restrictions on actual setting changes still apply. Narrow layouts wrap
 controls and preserve horizontal scrolling within the notation, not the page.
+
+### Style mastery and rewards
+
+Detailed mastery follows the same hierarchy used for practice:
+**style → section → instrument track**. Completing the top density level through
+an eligible full-pattern, normal-tempo advancement earns that instrument's
+badge in that section. A section badge requires every playable instrument in
+the section. The Bass and Drums indicators require every playable track in
+that family across the style; an absent family is shown as not applicable.
+Silent section/track combinations never block an award.
+
+The style header shows completed parts over total playable parts. Mastering
+every one earns the **Style Hero** reward and trophy. Returning to a previously
+practiced section and instrument resumes its saved density level. Single-bar
+drills, reduced speed, a lowered BPM, and manually previewing a density can
+improve best-score history but cannot award detailed mastery.
+
+Mastery data is stored locally in the browser. Scores and trophies saved by an
+older version remain visible as legacy history, but are not assigned to a
+specific section or instrument because that detail was not previously recorded.
 
 For browser UI regression checks, open a fresh **dev-server** page at desktop
 size, then run in its browser console:
@@ -413,10 +437,15 @@ GM channel 10 and Yamaha percussion bank MSBs 126/127 identify drums; GM bass
 programs 33–40 (one-based), or a track
 name containing "bass", identify bass. Other pitched tracks are harmonic parts.
 All levels are cumulative filters of the actual source notes, not generated
-practice patterns. Pitches, onset times, durations, and velocities are preserved
-(durations are clipped at section/exercise boundaries).
+practice patterns. Within each bar, notes are ranked by musical priority and
+distance from the beat. Levels keep strictly nested prefixes of that ranking:
+a non-empty bar exposes at least one note at Level 1, two when available at
+Level 2, three when available at Level 3, and every source note at Level 4.
+Sparse bars clamp to the notes they contain; no notes are fabricated. Pitches,
+onset times, durations, and velocities are preserved (durations are clipped at
+section/exercise boundaries).
 
-| Level | Drums | Bass and chords |
+| Priority | Drums | Bass and chords |
 |---|---|---|
 | 1 | All kicks (33/35/36), on or off the beat | Root notes on the main beats |
 | 2 | Add snares and side stick (31/37/38/40), on or off the beat | Add root notes off the beat |
@@ -437,7 +466,7 @@ harmonic notes, following chord changes and sustaining the established harmony
 through single-note passing tones. Where there is no multi-note harmonic voicing,
 the bar's harmonic notes are used; bass-only material falls back to the first
 on-beat bass pitch (or its first bass note). This is heuristic, not an authored
-chord chart. Empty lower layers are valid: no missing roots or beats are invented.
+chord chart.
 
 ### Yamaha metadata and transposition
 
