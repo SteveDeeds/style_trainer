@@ -298,7 +298,9 @@ export function buildExercise(style, { section = 0, bars = 4, focus = 'full', le
   const markedTarget = target.map(n => ({ ...n, isTarget: true }));
   return {
     target: markedTarget, backing: backing.filter(n => selectedTrack ? trackIdOf(n) !== trackId : !selectedParts.includes(n.part)),
-    groups: groupNotes(markedTarget), chords, barTicks, durationTicks, meter, bars, ppq: style.ppq, level, focus, trackId, randomized: harmony !== null,
+    groups: groupNotes(markedTarget), chords, barTicks, durationTicks, meter, bars, ppq: style.ppq,
+    level, maxLevel: LAYERS[focus].length, focus, trackId,
+    sectionIndex: section, sectionName: selected.name, randomized: harmony !== null,
   };
 }
 

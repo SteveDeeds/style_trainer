@@ -10,7 +10,7 @@ import { sourceHarmony } from './yamaha.js';
 import { assetUrl } from './assets.js';
 import { clearSavedSounds, downloadSounds, readSavedSounds, saveSounds, validateStarter } from './soundfont-cache.js';
 import { folderPermission, forgetStyleFolder, readStyleEntry, readStyleFolder, saveStyleFolder, scanStyleFolder, stylesFromFiles } from './style-folder.js';
-import { evaluateTrophies, loadMastery, recordAdvancementToMastery, recordLoopToMastery, saveMastery, TROPHIES } from './mastery.js';
+import { buildMasteryView, leafProgress, loadMastery, recordAdvancementToMastery, recordLoopToMastery, registerStyleCatalog, saveMastery, TROPHIES } from './mastery.js';
 
 const icons = {
   play: '<path d="m8 5 11 7-11 7Z"/>',
@@ -115,7 +115,7 @@ document.querySelector('#app').innerHTML = `
     <p>One chord per bar. Changing harmony resets the streak, not unlocked levels. Full-pattern randomized exercises qualify for speed and level advancement.</p>
   </section>
   <footer class="transport-shell"><div class="transport-inner"><span id="transport-caption" class="transport-caption">Start with a little listening.</span><nav class="transport" aria-label="Transport and practice modes"><button id="play" class="mode-button play-button" aria-pressed="false">${icon('play')}<span>PLAY<small>Listen</small></span></button><button id="step" class="mode-button" aria-pressed="false">${icon('step')}<span>STEP<small>Wait for notes</small></span></button><button id="record" class="mode-button record-button" aria-pressed="false">${icon('record')}<span>RECORD<small>Test yourself</small></span></button><button id="stop" class="mode-button stop-button" aria-pressed="true">${icon('stop')}<span>STOP<small>Reset</small></span></button><button id="loop" class="loop-button" aria-pressed="true">${icon('loop')}<span>LOOP: ON</span></button></nav><label class="volume-label">Volume <input id="volume" type="range" min="0" max="100" value="65" aria-label="Volume"></label></div></footer>
-  <dialog id="mastery-dialog" class="setup-drawer" aria-labelledby="mastery-dialog-title">
+  <dialog id="mastery-dialog" class="setup-drawer mastery-showcase" aria-labelledby="mastery-dialog-title">
     <div class="dialog-heading"><h2 id="mastery-dialog-title">Style Mastery & Trophies</h2><button data-close="mastery-dialog" aria-label="Close mastery and trophies">×</button></div>
     <p class="drawer-notice" data-notice role="status"></p>
     <div class="mastery-overview">
@@ -123,14 +123,18 @@ document.querySelector('#app').innerHTML = `
       <div class="mastery-stat-card"><span class="stat-number" id="mastery-stat-trophies">0</span><span class="stat-label">Trophies</span></div>
       <div class="mastery-stat-card"><span class="stat-number" id="mastery-stat-flawless">0</span><span class="stat-label">100% Loops</span></div>
     </div>
-    <section class="mastery-section">
+    <div class="mastery-tabs" role="tablist" aria-label="Mastery showcase">
+      <button id="mastery-tab-styles" role="tab" aria-selected="true" aria-controls="mastery-panel-styles">Style Mastery</button>
+      <button id="mastery-tab-trophies" role="tab" aria-selected="false" aria-controls="mastery-panel-trophies" tabindex="-1">Trophy Case</button>
+    </div>
+    <section id="mastery-panel-styles" class="mastery-section mastery-tab-panel" role="tabpanel" aria-labelledby="mastery-tab-styles">
       <div class="mastery-section-header">
-        <h3>Style Mastery</h3>
-        <span class="mastery-subtitle">Highest level completed & 100% flawless awards</span>
+        <h3>Your style journey</h3>
+        <span class="mastery-subtitle">Open a style, then a section, to see every playable instrument.</span>
       </div>
       <div id="mastery-styles-list" class="mastery-styles-list"></div>
     </section>
-    <section class="mastery-section">
+    <section id="mastery-panel-trophies" class="mastery-section mastery-tab-panel" role="tabpanel" aria-labelledby="mastery-tab-trophies" hidden>
       <div class="mastery-section-header">
         <h3>Trophy Case</h3>
         <span class="mastery-subtitle">Milestones & secret achievements</span>
@@ -156,6 +160,8 @@ const audio = new AudioEngine();
 let style = createDemo();
 let progression = new Progression(4);
 let mastery = loadMastery();
+let currentMasteryCatalog = null;
+let masterySaveFailed = false;
 let exercise;
 let randomizedHarmony = null;
 let busy = false;
@@ -311,10 +317,17 @@ const transport = new Transport({
       audio.perfectFanfare();
     }
 
-    const maxLevel = trackLayers().length;
+    registerStyleCatalog(mastery, currentMasteryCatalog);
+    const masteryContext = {
+      sectionIndex: scoredExercise.sectionIndex,
+      sectionName: scoredExercise.sectionName,
+      trackId: scoredExercise.trackId,
+    };
+    const maxLevel = scoredExercise.maxLevel;
     const loopRes = recordLoopToMastery(mastery, {
       styleName: style.name,
       category: style.category || (style.demo ? 'Demo Style' : 'Imported Style'),
+      ...masteryContext,
       level: scoredExercise.level,
       maxLevel,
       score: result.score,
@@ -322,7 +335,7 @@ const transport = new Transport({
       isPracticeOnly: Boolean(scoredExercise.practiceOnly),
     });
     mastery = loopRes.mastery;
-    saveMastery(mastery);
+    persistMastery();
     const unlockedTrophies = [...loopRes.unlocked];
 
     const advancement = progression.submitExercise(result.score, scoredExercise);
@@ -343,6 +356,7 @@ const transport = new Transport({
       const advRes = recordAdvancementToMastery(mastery, {
         styleName: style.name,
         category: style.category || (style.demo ? 'Demo Style' : 'Imported Style'),
+        ...masteryContext,
         completedLevel: scoredExercise.level,
         newLevel: progression.level,
         maxLevel,
@@ -353,7 +367,7 @@ const transport = new Transport({
         bpm: Number($('bpm').value),
       });
       mastery = advRes.mastery;
-      saveMastery(mastery);
+      persistMastery();
       unlockedTrophies.push(...advRes.unlocked);
 
       notify(advancement.nextSpeed ? `Congratulations! Rolling 3-loop average reached 90% or higher at ${scoredExercise.practiceSpeed}%. Speed increased to ${advancement.nextSpeed}% at level ${progression.level} — press Play, Step or Record when ready.` :
@@ -421,6 +435,9 @@ function updateExerciseDescription() {
 }
 function resetProgress() {
   progression = new Progression(trackLayers().length);
+  const saved = leafProgress(mastery, selectedMasteryContext());
+  const savedLevel = Math.max(1, Math.min(progression.maxLevel, saved.highestLevel || 1));
+  if (savedLevel > 1) progression.selectLevel(savedLevel);
   history = [];
   updateProgress();
 }
@@ -452,6 +469,7 @@ function setStyle(next) {
   style = next;
   $('section').replaceChildren(...style.sections.map((s, i) => new Option(s.name, i)));
   updateTracks('');
+  currentMasteryCatalog = masteryCatalog(style);
   randomizedHarmony = initialHarmony(style, Number($('bars').value));
   $('harmony-key').value = randomizedHarmony ? 'C' :
     style.key === 'Unknown' ? (sourcePolicy() ? sourceHarmony(sourcePolicy()).key : 'C') : style.key;
@@ -476,6 +494,49 @@ function trackLayers() {
   const track = styleTracks(style).find(track => track.id === $('focus').value);
   if (!track) throw new Error('Select a playable track from this style.');
   return LAYERS[track.part];
+}
+
+function masteryCatalog(source) {
+  const tracks = styleTracks(source);
+  const leaves = source.sections.flatMap((section, sectionIndex) => {
+    const active = new Set(source.notes
+      .filter(note => note.tick >= section.start && note.tick < section.end)
+      .map(trackIdOf));
+    return tracks.filter(track => active.has(track.id)).map(track => ({
+      sectionIndex,
+      sectionName: section.name,
+      trackId: track.id,
+      trackName: track.name,
+      family: track.part,
+      maxLevel: LAYERS[track.part].length,
+    }));
+  });
+  return {
+    styleName: source.name,
+    category: source.category || (source.demo ? 'Demo Style' : 'Imported Style'),
+    leaves,
+  };
+}
+
+function selectedMasteryContext() {
+  const sectionIndex = Number($('section').value);
+  return {
+    styleName: style.name,
+    sectionIndex,
+    sectionName: style.sections[sectionIndex]?.name || '',
+    trackId: $('focus').value,
+  };
+}
+
+function persistMastery() {
+  if (saveMastery(mastery)) {
+    masterySaveFailed = false;
+    return;
+  }
+  if (!masterySaveFailed) {
+    masterySaveFailed = true;
+    notify('Mastery progress is available for this session but could not be saved in this browser.', true);
+  }
 }
 function updateDensity() {
   const layers = trackLayers();
@@ -1334,6 +1395,33 @@ $('help-dialog').addEventListener('keydown', event => {
   if (event.key === 'Escape') { event.preventDefault(); $('help-dialog').close(); }
 });
 $('help-dialog').addEventListener('close', () => $('help').focus());
+
+function selectMasteryTab(tab, focus = false) {
+  const tabs = [...document.querySelectorAll('#mastery-dialog [role="tab"]')];
+  for (const candidate of tabs) {
+    const selected = candidate === tab;
+    candidate.setAttribute('aria-selected', String(selected));
+    candidate.tabIndex = selected ? 0 : -1;
+    $(candidate.getAttribute('aria-controls')).hidden = !selected;
+  }
+  if (focus) tab.focus();
+}
+
+for (const tab of document.querySelectorAll('#mastery-dialog [role="tab"]')) {
+  tab.addEventListener('click', () => selectMasteryTab(tab));
+  tab.addEventListener('keydown', event => {
+    const tabs = [...document.querySelectorAll('#mastery-dialog [role="tab"]')];
+    const current = tabs.indexOf(tab);
+    const target = event.key === 'Home' ? 0 :
+      event.key === 'End' ? tabs.length - 1 :
+        event.key === 'ArrowRight' ? (current + 1) % tabs.length :
+          event.key === 'ArrowLeft' ? (current - 1 + tabs.length) % tabs.length : -1;
+    if (target < 0) return;
+    event.preventDefault();
+    selectMasteryTab(tabs[target], true);
+  });
+}
+
 for (const [triggerId, dialogId] of [['open-style', 'style-dialog'], ['open-devices', 'devices-dialog'], ['open-mastery', 'mastery-dialog']]) {
   const trigger = $(triggerId);
   const dialog = $(dialogId);
@@ -1344,7 +1432,10 @@ for (const [triggerId, dialogId] of [['open-style', 'style-dialog'], ['open-devi
     for (const other of document.querySelectorAll('.setup-drawer[open]')) other.close();
     if ($('harmony-popover').matches(':popover-open')) $('harmony-popover').hidePopover();
     if (dialogId === 'devices-dialog') updateLatency();
-    if (dialogId === 'mastery-dialog') renderMasteryDialog();
+    if (dialogId === 'mastery-dialog') {
+      renderMasteryDialog();
+      selectMasteryTab($('mastery-tab-styles'));
+    }
     releaseInputs();
     dialog.show();
     trigger.setAttribute('aria-expanded', 'true');
@@ -1464,68 +1555,116 @@ function updateMasteryBadge() {
   }
 }
 
+function masteryPill(text, variant = '') {
+  const pill = document.createElement('span');
+  pill.className = `mastery-pill ${variant}`.trim();
+  pill.textContent = text;
+  return pill;
+}
+
+function renderMasteryTrack(track) {
+  const row = document.createElement('div');
+  row.className = `mastery-track ${track.mastered ? 'mastered' : ''}`;
+  const identity = document.createElement('div');
+  identity.className = 'mastery-track-info';
+  const title = document.createElement('strong');
+  title.textContent = track.name;
+  const meta = document.createElement('span');
+  meta.textContent = `${track.family === 'chords' ? 'Harmony' : track.family[0].toUpperCase() + track.family.slice(1)}${track.bestScore ? ` · Best ${track.bestScore}%${track.bestBpm ? ` @ ${track.bestBpm} BPM` : ''}` : ''}`;
+  identity.append(title, meta);
+  const status = track.mastered ? masteryPill('✓ Mastered', 'complete') :
+    masteryPill(track.highestLevel ? `Level ${track.highestLevel} / ${track.maxLevel}` : 'Not started');
+  row.append(identity, status);
+  return row;
+}
+
+function renderMasterySection(section) {
+  const details = document.createElement('details');
+  details.className = `mastery-section-item ${section.mastered ? 'mastered' : ''}`;
+  const summary = document.createElement('summary');
+  const title = document.createElement('strong');
+  title.textContent = section.name;
+  summary.append(title, section.mastered
+    ? masteryPill('✓ Section mastered', 'complete')
+    : masteryPill(`${section.completed} / ${section.total} instruments`));
+  const tracks = document.createElement('div');
+  tracks.className = 'mastery-track-list';
+  tracks.replaceChildren(...section.tracks.map(renderMasteryTrack));
+  details.append(summary, tracks);
+  return details;
+}
+
+function familyPill(label, summary) {
+  if (!summary.applicable) return masteryPill(`${label} · N/A`, 'muted');
+  return summary.mastered
+    ? masteryPill(`✓ All ${label} mastered`, 'complete')
+    : masteryPill(`${label} · ${summary.completed} / ${summary.total}`);
+}
+
+function renderMasteryStyle(model) {
+  const details = document.createElement('details');
+  details.className = `mastery-style-item ${model.hero ? 'hero' : ''}`;
+  details.open = model.name === style.name;
+  const summary = document.createElement('summary');
+  const identity = document.createElement('div');
+  identity.className = 'style-item-info';
+  const title = document.createElement('span');
+  title.className = 'style-item-title';
+  title.textContent = model.name;
+  if (model.name === style.name) title.append(masteryPill('Current', 'current'));
+  const meta = document.createElement('span');
+  meta.className = 'style-item-meta';
+  meta.textContent = `${model.category}${model.bestScore ? ` · Best ${model.bestScore}%${model.bestBpm ? ` @ ${model.bestBpm} BPM` : ''}` : ''}`;
+  identity.append(title, meta);
+  const status = model.hero
+    ? masteryPill('🏆 Style Hero', 'hero')
+    : masteryPill(`${model.completedTracks} / ${model.totalTracks} parts`);
+  summary.append(identity, status);
+
+  const body = document.createElement('div');
+  body.className = 'mastery-style-body';
+  const familyRow = document.createElement('div');
+  familyRow.className = 'mastery-family-row';
+  familyRow.append(
+    familyPill('Bass', model.families.bass),
+    familyPill('Drums', model.families.drums),
+  );
+  body.append(familyRow);
+  if (model.legacy) {
+    const legacy = document.createElement('p');
+    legacy.className = 'mastery-legacy';
+    legacy.textContent = 'Legacy style scores and trophies are preserved. Detailed section and instrument mastery starts fresh.';
+    body.append(legacy);
+  }
+  if (model.sections.length) {
+    const sections = document.createElement('div');
+    sections.className = 'mastery-section-list';
+    sections.replaceChildren(...model.sections.map(renderMasterySection));
+    body.append(sections);
+  } else {
+    const empty = document.createElement('p');
+    empty.className = 'mastery-empty';
+    empty.textContent = 'Load this style again to discover its playable sections and instruments.';
+    body.append(empty);
+  }
+  details.append(summary, body);
+  return details;
+}
+
 function renderMasteryDialog() {
-  const styles = Object.values(mastery.styles || {});
-  const masteredCount = styles.filter(s => s.mastered).length;
+  const view = buildMasteryView(mastery, currentMasteryCatalog);
+  const eligibleStyles = view.styles.filter(item => item.totalTracks > 0);
+  const masteredCount = eligibleStyles.filter(item => item.hero).length;
   const trophyKeys = Object.keys(mastery.trophies || {});
   const trophyCount = trophyKeys.length;
   const total100Count = mastery.stats?.total100Loops || 0;
 
-  $('mastery-stat-mastered').textContent = `${masteredCount} / ${Math.max(styles.length, 1)}`;
+  $('mastery-stat-mastered').textContent = `${masteredCount} / ${eligibleStyles.length}`;
   $('mastery-stat-trophies').textContent = `${trophyCount} / ${TROPHIES.length}`;
   $('mastery-stat-flawless').textContent = String(total100Count);
 
-  const currentName = style?.name || 'Current Style';
-  const displayStyles = [...styles];
-  if (!displayStyles.some(s => s.name === currentName)) {
-    displayStyles.unshift({
-      name: currentName,
-      category: style?.category || (style?.demo ? 'Demo Style' : 'Local Style'),
-      highestLevel: 0,
-      maxLevel: trackLayers().length,
-      mastered: false,
-      has100OnHighest: false,
-      hasEver100: false,
-      bestScore: 0,
-      bestBpm: 0,
-    });
-  }
-
   const stylesList = $('mastery-styles-list');
-  stylesList.replaceChildren(...displayStyles.map(s => {
-    const item = document.createElement('div');
-    item.className = `mastery-style-item ${s.mastered ? 'mastered' : ''}`;
-
-    const isCurrent = s.name === style?.name;
-    const statusIcon = s.mastered ? '🏆' : s.highestLevel > 0 ? '🎵' : '⏳';
-    const levelText = s.mastered ? 'Mastered' : s.highestLevel > 0 ? `Level ${s.highestLevel} / ${s.maxLevel || 4}` : 'Not started';
-
-    let awardBadge = '';
-    if (s.has100OnHighest && s.mastered) {
-      awardBadge = '<span class="award-pill crown" title="Flawless 100% on Master level!">👑 Flawless Master</span>';
-    } else if (s.has100OnHighest) {
-      awardBadge = `<span class="award-pill star" title="Flawless 100% on Level ${s.highestLevel}!">⭐ 100% Star</span>`;
-    } else if (s.hasEver100) {
-      awardBadge = '<span class="award-pill star" title="Achieved 100% on a previous level">⭐ 100% Star</span>';
-    }
-
-    const metaParts = [s.category || 'Style'];
-    if (s.bestScore > 0) metaParts.push(`Best ${s.bestScore}%${s.bestBpm ? ` @ ${s.bestBpm} BPM` : ''}`);
-
-    item.innerHTML = `
-      <div class="style-item-header">
-        <div class="style-item-info">
-          <span class="style-item-title">${s.name} ${isCurrent ? '<small class="current-tag">CURRENT</small>' : ''}</span>
-          <span class="style-item-meta">${metaParts.join(' · ')}</span>
-        </div>
-        <div class="style-item-awards">
-          ${awardBadge}
-          <span class="level-pill ${s.mastered ? 'mastered' : ''}">${statusIcon} ${levelText}</span>
-        </div>
-      </div>
-    `;
-    return item;
-  }));
+  stylesList.replaceChildren(...view.styles.map(renderMasteryStyle));
 
   const grid = $('trophies-grid');
   grid.replaceChildren(...TROPHIES.map(trophy => {

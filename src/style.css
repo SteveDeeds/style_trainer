@@ -228,7 +228,11 @@ dialog p, .harmony-popover p { font-size: 13px; line-height: 1.65; margin-top: 1
 .harmony-popover { width: 400px; inset: 64px 0 auto; margin: 0 auto; max-height: calc(100dvh - 180px); }
 
 /* Mastery & Trophies Drawer */
-#mastery-dialog { width: min(520px, calc(100vw - 32px)); }
+#mastery-dialog {
+  inset: 64px auto auto 50%; transform: translateX(-50%);
+  width: min(1080px, calc(100vw - 32px)); max-width: 1080px;
+  max-height: calc(100dvh - 150px); padding: 24px 28px;
+}
 .mastery-overview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0; }
 .mastery-stat-card {
   background: #f4f7f9; border: 1px solid var(--border); border-radius: 8px;
@@ -236,30 +240,68 @@ dialog p, .harmony-popover p { font-size: 13px; line-height: 1.65; margin-top: 1
 }
 .stat-number { font: 800 20px 'Manrope', sans-serif; color: var(--teal); }
 .stat-label { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-.mastery-section { margin-top: 18px; }
+.mastery-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: 18px; }
+.mastery-tabs button {
+  border: 0; border-bottom: 3px solid transparent; background: transparent;
+  padding: 10px 14px 8px; color: var(--muted); font-weight: 700;
+}
+.mastery-tabs button[aria-selected=true] { border-bottom-color: var(--teal); color: #006e5e; }
+.mastery-section { margin-top: 16px; }
 .mastery-section-header { margin-bottom: 10px; }
 .mastery-section-header h3 { font: 800 15px 'Manrope', sans-serif; color: #101b2c; margin: 0; }
 .mastery-subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; display: block; }
-.mastery-styles-list { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; padding-right: 4px; }
-.mastery-empty { background: #f9fafb; border: 1px dashed var(--border); border-radius: 8px; padding: 16px; text-align: center; }
-.mastery-empty p { font-size: 12px; color: var(--muted); margin: 0; }
-.mastery-style-item {
-  background: #fff; border: 1px solid var(--border); border-radius: 8px;
-  padding: 10px 12px; transition: border-color .2s, background .2s;
+.mastery-styles-list { display: flex; flex-direction: column; gap: 10px; }
+.mastery-empty {
+  background: #f9fafb; border: 1px dashed var(--border); border-radius: 8px;
+  padding: 14px; text-align: center; font-size: 12px; color: var(--muted); margin: 0;
 }
-.mastery-style-item.mastered { border-color: #aee6d7; background: #f9fdfc; }
-.style-item-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mastery-style-item {
+  background: #fff; border: 1px solid var(--border); border-radius: 9px;
+  overflow: hidden; transition: border-color .2s, background .2s;
+}
+.mastery-style-item.hero { border-color: #e9bb4c; background: #fffcf0; box-shadow: 0 3px 12px #b4530918; }
+.mastery-style-item > summary, .mastery-section-item > summary {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 12px 14px; list-style: none;
+}
+.mastery-style-item > summary::-webkit-details-marker,
+.mastery-section-item > summary::-webkit-details-marker { display: none; }
+.mastery-style-item > summary::before, .mastery-section-item > summary::before {
+  content: '›'; color: var(--muted); font-size: 19px; line-height: 1;
+}
+.mastery-style-item[open] > summary::before, .mastery-section-item[open] > summary::before { transform: rotate(90deg); }
 .style-item-info { display: flex; flex-direction: column; gap: 2px; }
-.style-item-title { font: 700 13px 'Manrope', sans-serif; color: #101b2c; display: flex; align-items: center; gap: 6px; }
-.current-tag { font-size: 9px; font-weight: 700; background: #e6f6f3; color: var(--teal); padding: 1px 5px; border-radius: 4px; }
+.style-item-title { font: 700 14px 'Manrope', sans-serif; color: #101b2c; display: flex; align-items: center; gap: 6px; }
 .style-item-meta { font-size: 11px; color: var(--muted); }
-.style-item-awards { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.level-pill { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 12px; background: #edf2f7; color: #334e68; }
-.level-pill.mastered { background: #e6f6f3; color: #006e5e; border: 1px solid #aee6d7; }
-.award-pill { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 12px; }
-.award-pill.crown { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
-.award-pill.star { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
-.trophies-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; max-height: 280px; overflow-y: auto; padding-right: 4px; }
+.mastery-pill {
+  display: inline-flex; align-items: center; flex-shrink: 0; border-radius: 999px;
+  padding: 3px 8px; background: #edf2f7; color: #334e68; font-size: 10px; font-weight: 700;
+}
+.mastery-pill.complete { background: #e6f6f3; color: #006e5e; border: 1px solid #aee6d7; }
+.mastery-pill.hero { background: #fef3c7; color: #92400e; border: 1px solid #f0c95e; }
+.mastery-pill.current { background: #e6f6f3; color: var(--teal); text-transform: uppercase; font-size: 8px; }
+.mastery-pill.muted { color: #71808e; background: #f3f5f7; }
+.mastery-style-body { padding: 0 14px 14px 39px; }
+.mastery-family-row { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
+.mastery-legacy {
+  margin: 0 0 10px !important; padding: 8px 10px; border-radius: 6px;
+  background: #fff8e6; color: #785b19; font-size: 11px !important;
+}
+.mastery-section-list { display: flex; flex-direction: column; gap: 7px; }
+.mastery-section-item { border: 1px solid var(--border); border-radius: 7px; background: #fbfcfd; overflow: hidden; }
+.mastery-section-item.mastered { border-color: #aee6d7; background: #f8fcfa; }
+.mastery-section-item > summary { padding: 9px 11px; font-size: 12px; }
+.mastery-track-list { border-top: 1px solid var(--border); background: #fff; }
+.mastery-track {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 12px 9px 34px; border-bottom: 1px solid #edf1f3;
+}
+.mastery-track:last-child { border-bottom: 0; }
+.mastery-track.mastered { background: #fbfefc; }
+.mastery-track-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mastery-track-info strong { font-size: 11px; overflow-wrap: anywhere; }
+.mastery-track-info span { color: var(--muted); font-size: 10px; }
+.trophies-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
 .trophy-card {
   border: 1px solid var(--border); border-radius: 8px; padding: 10px;
   display: flex; gap: 10px; align-items: flex-start;
@@ -315,5 +357,14 @@ dialog p, .harmony-popover p { font-size: 13px; line-height: 1.65; margin-top: 1
   .volume-label input { width: 140px; }
   .setup-drawer { inset: 100px 16px auto auto; max-height: calc(100dvh - 240px); }
   .harmony-popover { inset-block-start: 100px; max-height: calc(100dvh - 240px); }
+  #mastery-dialog {
+    inset: 84px 8px auto; transform: none; width: calc(100vw - 16px);
+    max-height: calc(100dvh - 170px); padding: 18px 14px;
+  }
+  .mastery-overview { gap: 6px; }
+  .mastery-stat-card { padding-inline: 4px; }
+  .mastery-style-item > summary { align-items: flex-start; }
+  .mastery-style-body { padding-left: 14px; }
+  .mastery-track { padding-left: 12px; align-items: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) { button { transition: none; } }

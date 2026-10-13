@@ -33,6 +33,21 @@ test('style preview prefers Main A even when an intro comes first', () => {
   assert.equal(buildStylePreview(style).target.length, buildExercise(style, { section: 1, level: 4 }).target.length);
 });
 
+test('built and practice exercises retain immutable section and track context', () => {
+  const style = createDemo();
+  const trackId = styleTracks(style)[0].id;
+  const exercise = buildExercise(style, { section: 0, trackId, level: 2 });
+  const practice = practiceExercise(exercise, { bpm: 96, normalBpm: 96, speed: 75 });
+  assert.equal(exercise.sectionIndex, 0);
+  assert.equal(exercise.sectionName, style.sections[0].name);
+  assert.equal(exercise.trackId, trackId);
+  assert.equal(exercise.maxLevel, 4);
+  assert.deepEqual(
+    [practice.sectionIndex, practice.sectionName, practice.trackId, practice.maxLevel],
+    [exercise.sectionIndex, exercise.sectionName, exercise.trackId, exercise.maxLevel],
+  );
+});
+
 test('live input uses one selected instrument for correct and incorrect pitches with piano fallback', () => {
   const source = { part: 'bass', program: 33 };
   assert.equal(monitorNote(36, 80, source).program, 33);
@@ -1259,5 +1274,3 @@ test('sparse styles with fewer than 3 notes clamp cleanly without throwing or fa
   assert.equal(l1.target[0].pitch, 36);
   assert.deepEqual(l2.target.map(n => n.pitch), [36, 40]);
 });
-
-

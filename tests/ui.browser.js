@@ -404,6 +404,23 @@ export async function verifyUI() {
     check(document.activeElement === $(trigger), `${dialog} restores trigger focus`);
     check($('notation').querySelector('svg').getAttribute('aria-label') === before, 'Setup disclosure preserves the exercise');
   }
+  $('open-mastery').click();
+  check($('mastery-dialog').open, 'Mastery showcase opens');
+  check($('mastery-tab-styles').getAttribute('aria-selected') === 'true', 'Style Mastery is the default tab');
+  check(!$('mastery-panel-styles').hidden && $('mastery-panel-trophies').hidden, 'Only the selected mastery panel is exposed');
+  check($('mastery-styles-list').querySelector('.mastery-style-item'), 'Current style appears in the mastery hierarchy');
+  check($('mastery-styles-list').querySelector('.mastery-section-item'), 'Playable sections appear beneath the current style');
+  check($('mastery-styles-list').querySelector('.mastery-track'), 'Playable instruments appear beneath sections');
+  check($('mastery-styles-list').textContent.includes('Bass') && $('mastery-styles-list').textContent.includes('Drums'), 'Family mastery indicators are visible');
+  if (innerWidth >= 900) check($('mastery-dialog').getBoundingClientRect().width >= 700, 'Mastery uses a dedicated wide surface');
+  $('mastery-tab-trophies').click();
+  check($('mastery-tab-trophies').getAttribute('aria-selected') === 'true' && !$('mastery-panel-trophies').hidden, 'Trophy Case tab switches panels');
+  $('mastery-tab-trophies').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  check($('mastery-tab-styles').getAttribute('aria-selected') === 'true' && document.activeElement === $('mastery-tab-styles'), 'Arrow keys switch and focus mastery tabs');
+  $('mastery-dialog').querySelector('[data-close]').click();
+  await settle();
+  check(document.activeElement === $('open-mastery'), 'Mastery showcase restores trigger focus');
+  check($('notation').querySelector('svg').getAttribute('aria-label') === before, 'Mastery showcase preserves the exercise');
   $('show-keys').checked = true;
   $('show-keys').dispatchEvent(new Event('change'));
   check(!$('keys-panel').hidden && $('practice-pads').children.length > 0, 'Keys toggle reveals playable pads');
