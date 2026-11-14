@@ -3,8 +3,223 @@ import { createDemo } from '../src/midi.js';
 import { buildExercise, styleTracks } from '../src/training.js';
 import { clearSavedSounds, readSavedSounds, saveSounds, validateStarter } from '../src/soundfont-cache.js';
 import { AudioEngine } from '../src/audio.js';
+import { Transport } from '../src/transport.js';
 import { PianoKeyboard } from '../src/piano.js';
-import { forgetStyleFolder, readStyleFolder, saveStyleFolder } from '../src/style-folder.js';
+import { forgetLastStyle, forgetStyleFolder, readLastStyle, readStyleFolder, saveLastStyle, saveStyleFolder } from '../src/style-folder.js';
+
+export async function verifyStyleSnapshotStorage() {
+  const previous = await readLastStyle();
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(message);
+    checks.push(message);
+  };
+  try {
+    const first = createDemo();
+    first.name = 'Saved style test';
+    await saveLastStyle(first);
+    const pitch = first.notes[0].pitch;
+    first.notes[0].pitch++;
+    const saved = await readLastStyle();
+    check(saved.name === 'Saved style test' && saved.notes[0].pitch === pitch, 'Last style is a persisted copy, not a live reference');
+    const replacement = createDemo();
+    replacement.name = 'Replacement style test';
+    await saveLastStyle(replacement);
+    check((await readLastStyle()).name === replacement.name, 'Loading a new style replaces the remembered style');
+    await forgetLastStyle();
+    check(!await readLastStyle(), 'Remembered style can be removed without clearing other browser data');
+    const open = indexedDB.open;
+    indexedDB.open = () => { throw new DOMException('Storage denied', 'SecurityError'); };
+    try {
+      let failed = false;
+      try { await saveLastStyle(replacement); }
+      catch (error) { failed = error.name === 'SecurityError'; }
+      check(failed, 'Style storage failures propagate to the caller');
+    } finally { indexedDB.open = open; }
+    return checks;
+  } finally {
+    if (previous) await saveLastStyle(previous);
+    else await forgetLastStyle();
+  }
+}
+
+export async function verifyContinuousGameplay() {
+  const $ = id => document.getElementById(id);
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(message);
+    checks.push(message);
+  };
+  const savedMastery = localStorage.getItem('style-trainer-mastery-v2');
+  const start = Transport.prototype.start;
+  const cue = AudioEngine.prototype.tempoChange;
+  const encourage = AudioEngine.prototype.encourage;
+  const directions = [];
+  const encouragements = [];
+  let transport;
+  let now = performance.now();
+  Transport.prototype.start = function(...args) {
+    transport = this;
+    this.now = () => now;
+    start.apply(this, args);
+    clearInterval(this.timer);
+  };
+  AudioEngine.prototype.tempoChange = function(direction) {
+    directions.push(direction);
+    cue.call(this, direction);
+  };
+  AudioEngine.prototype.encourage = function(kind) {
+    encourage.call(this, kind);
+    encouragements.push({ kind, file: this.lastEncouragement.get(kind) });
+  };
+  const advance = time => { now = time; transport.tick(); };
+  const completeLoop = (perfect, closeFirst = false) => {
+    const score = transport.scores.get(transport.cycle);
+    const count = typeof perfect === 'number' ? Math.floor(score.expected.length * perfect) : perfect ? score.expected.length : 0;
+    for (const [index, note] of score.expected.slice(0, count).entries()) {
+      const offset = closeFirst && index === 0 ? (score.perfectTolerance + score.halfTolerance) / 2 : 0;
+      transport.input(note.pitch, true, note.time + transport.latencyMs + offset);
+    }
+    advance(score.endTime + 1);
+    advance(score.endTime + score.halfTolerance + transport.latencyMs + 1);
+  };
+  const waitForRecord = async () => {
+    const limit = performance.now() + 5000;
+    while (transport?.mode !== 'record') {
+      if (performance.now() > limit) throw new Error('Record did not start.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  try {
+    $('open-devices').click();
+    $('preview').checked = true;
+    $('preview').dispatchEvent(new Event('change'));
+    $('devices-dialog').close();
+    $('bpm').value = '120';
+    $('bpm').dispatchEvent(new Event('change'));
+    $('layers').children[0].click();
+    $('practice-speed').value = '50';
+    $('practice-speed').dispatchEvent(new Event('change'));
+    $('record').click();
+    await waitForRecord();
+    for (const speed of [75, 100]) {
+      if (speed === 75) {
+        completeLoop(.85);
+        check(encouragements.at(-1)?.kind === 'qualifying', 'A qualifying non-perfect loop plays a short encouragement');
+        check(['huh.wav', 'yeah.wav'].includes(encouragements.at(-1).file), 'Qualifying loops use huh or yeah');
+        const shortCount = encouragements.length;
+        completeLoop(.75);
+        check(encouragements.length === shortCount, 'A below-80% loop does not play an achievement sample');
+        check($('streak-label').textContent.startsWith('1/3 loops at 80%+'), 'A lower score preserves the first qualifying loop');
+        check($('streak').querySelectorAll('.filled.pass').length === 1, 'Qualifying progress dots survive a lower score');
+        completeLoop(true, true);
+        check(!transport.pending, 'A high average does not replace three individually qualifying loops');
+        completeLoop(.75);
+        check($('streak-label').textContent.startsWith('2/3 loops at 80%+'), 'Separated successes accumulate toward advancement');
+        completeLoop(true);
+      } else {
+        for (let i = 0; i < 3; i++) completeLoop(true);
+      }
+      check($('streak').querySelectorAll('.filled.pass').length === 3, 'All three LEDs stay lit until advancement applies');
+      check(encouragements.at(-1)?.kind === 'advance', 'The third qualifying loop uses a longer achievement phrase');
+      check(['lets go.wav', 'yeah like that.wav'].includes(encouragements.at(-1).file), 'Achievement phrases contain multiple syllables');
+      check(transport.pending?.practiceSpeed === speed, `${speed}% speed queued after three qualifying loops`);
+      completeLoop(true);
+      check(transport.exercise.practiceSpeed === speed, `${speed}% speed applied at boundary`);
+      check($('streak').querySelectorAll('.filled.pass').length === 0, 'LEDs reset for the new tempo');
+      check($('record').getAttribute('aria-pressed') === 'true', 'Record stays active through speed increase');
+    }
+    for (let i = 0; i < 3; i++) completeLoop(true);
+    check(transport.pending?.level === 2, 'Next density queued without stopping');
+    check($('streak').querySelectorAll('.filled.pass').length === 3 && encouragements.at(-1)?.kind === 'advance', 'Density level-up lights the third LED and plays a longer phrase');
+    completeLoop(true);
+    check(transport.exercise.level === 2 && $('level-badge').textContent.includes('LEVEL 2'), 'Notation and density UI follow the new exercise');
+    for (let i = 0; i < 3; i++) completeLoop(false);
+    check(transport.pending?.practiceSpeed === 75, 'Struggling queues a slower tempo');
+    completeLoop(false);
+    check(transport.exercise.practiceSpeed === 75 && transport.exercise.level === 2, 'Slowdown preserves unlocked density');
+    check(directions.join(',') === 'up,up,down', 'Spoken tempo cues match speed changes, not density changes');
+    check(encouragements.some(cue => cue.kind === 'qualifying'), 'Qualifying four-bar patterns play encouragement samples');
+    check(encouragements.filter(cue => cue.kind === 'up').every(cue => ['bring it up.wav', 'come on.wav'].includes(cue.file)), 'Speed increases use only the assigned spoken samples');
+    check(encouragements.filter(cue => cue.kind === 'down').every(cue => ['drop it back.wav', 'drop it down.wav', 'lay back.wav'].includes(cue.file)), 'Slowdowns use only drop or lay back samples');
+    check($('practice-status').textContent.includes('90 BPM'), 'Displayed BPM matches the slowed transport');
+    check($('record').getAttribute('aria-pressed') === 'true', 'Record stays active after slowdown');
+    for (let i = 0; i < 3; i++) completeLoop(false);
+    check(transport.pending?.practiceSpeed === 50, 'Further struggle queues the 50% floor');
+    $('stop').click();
+    check(transport.mode === 'stop', 'Explicit Stop still ends recording');
+    check($('practice-status').textContent.includes('60 BPM'), 'Stopping with a queued change keeps settings and notation in sync');
+    check(directions.length === 3, 'Explicit Stop does not play an extra cue');
+    const beforeDrill = encouragements.length;
+    $('practice-bar').value = '0';
+    $('practice-bar').dispatchEvent(new Event('change'));
+    $('record').click();
+    await waitForRecord();
+    completeLoop(true);
+    check(encouragements.length === beforeDrill, 'A perfect one-bar drill does not trigger four-bar encouragement');
+    $('stop').click();
+    return checks;
+  } finally {
+    $('stop').click();
+    Transport.prototype.start = start;
+    AudioEngine.prototype.tempoChange = cue;
+    AudioEngine.prototype.encourage = encourage;
+    if (transport) transport.now = () => performance.now();
+    if (savedMastery === null) localStorage.removeItem('style-trainer-mastery-v2');
+    else localStorage.setItem('style-trainer-mastery-v2', savedMastery);
+  }
+}
+
+export async function verifyEarlyLoopHit({ close = false } = {}) {
+  const $ = id => document.getElementById(id);
+  const start = Transport.prototype.start;
+  const input = Transport.prototype.input;
+  let transport;
+  let now = performance.now();
+  Transport.prototype.start = function(...args) {
+    transport = this;
+    this.now = () => now;
+    start.apply(this, args);
+    clearInterval(this.timer);
+  };
+  Transport.prototype.input = function(pitch, on) { return input.call(this, pitch, on, now); };
+  try {
+    $('open-devices').click();
+    $('preview').checked = true;
+    $('preview').dispatchEvent(new Event('change'));
+    $('devices-dialog').close();
+    $('record').click();
+    const limit = performance.now() + 5000;
+    while (transport?.mode !== 'record') {
+      if (performance.now() > limit) throw new Error('Record did not start.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    const next = transport.scores.get(1);
+    const first = next.expected[0];
+    if (first.time !== next.startTime) throw new Error('This check needs a downbeat target.');
+    const offset = close ? (next.perfectTolerance + next.halfTolerance) / 2 : next.perfectTolerance / 2;
+    now = next.startTime - offset + transport.latencyMs;
+    transport.tick();
+    const pad = [...$('practice-pads').children].find(pad => Number(pad.dataset.pitch) === first.pitch);
+    if (!pad) throw new Error('The first target pad is unavailable.');
+    pad.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter' }));
+    pad.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter' }));
+    if (!first.hit || first.credit !== (close ? .5 : 1)) throw new Error('Early downbeat was not credited to the next loop.');
+    now = next.startTime + transport.latencyMs + 1;
+    transport.tick();
+    const head = $('notation').querySelector(`[aria-label="Play MIDI note ${first.pitch}"]`);
+    if (!head || getComputedStyle(head).fill !== (close ? 'rgb(36, 121, 201)' : 'rgb(0, 141, 66)')) {
+      throw new Error('Early downbeat lost its correct-note highlight at the loop boundary.');
+    }
+    return [close ? 'Close downbeat earns half credit and stays blue across the loop boundary' :
+      'Perfect downbeat earns full credit and stays green across the loop boundary'];
+  } finally {
+    $('stop').click();
+    Transport.prototype.start = start;
+    Transport.prototype.input = input;
+    if (transport) transport.now = () => performance.now();
+  }
+}
 
 export async function verifyStyleFolderUI() {
   const $ = id => document.getElementById(id);

@@ -3,6 +3,7 @@ import { readdir, readFile, copyFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { copySynth } from './copy-synth.js';
+import { ENCOURAGEMENT_SAMPLES } from '../src/assets.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicRelease = path.join(root, 'public-release');
@@ -117,6 +118,9 @@ async function stageAssetsAndNotices() {
     path.join(publicRelease, 'licenses', 'LICENSE-Vite.txt'),
   );
   await copySynth(synthDirectory);
+  for (const file of Object.values(ENCOURAGEMENT_SAMPLES).flat()) {
+    await copy(path.join(root, 'public', 'samples', file), path.join(publicRelease, 'samples', file));
+  }
 }
 
 async function verifyOutput() {
@@ -135,6 +139,11 @@ async function verifyOutput() {
   }
   if (await sha256(path.join(dist, soundfonts[0])) !== expectedSoundfont) {
     fail('built GeneralUser GS file does not match the approved checksum');
+  }
+  for (const file of Object.values(ENCOURAGEMENT_SAMPLES).flat()) {
+    if (await sha256(path.join(dist, 'samples', file)) !== await sha256(path.join(root, 'public', 'samples', file))) {
+      fail(`encouragement sample mismatch: ${file}`);
+    }
   }
 
   const publishedManifest = JSON.parse(await readFile(path.join(dist, 'library.json'), 'utf8'));

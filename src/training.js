@@ -336,7 +336,8 @@ export function practiceExercise(exercise, { bar = null, bpm, normalBpm, speed =
   const playbackBpm = bpm * speed / 100;
   const practiceOnly = bar !== null || speed < 100 || bpm < normalBpm;
   const nextSpeed = bar === null && bpm >= normalBpm ? ({ 50: 75, 75: 100 }[speed] ?? null) : null;
-  if (bar === null) return { ...exercise, playbackBpm, practiceOnly, practiceSpeed: speed, nextSpeed };
+  const previousSpeed = bar === null && bpm >= normalBpm ? ({ 100: 75, 75: 50 }[speed] ?? null) : null;
+  if (bar === null) return { ...exercise, playbackBpm, practiceOnly, practiceSpeed: speed, nextSpeed, previousSpeed };
   const start = bar * exercise.barTicks;
   const end = start + exercise.barTicks;
   const slice = notes => notes.flatMap(n => {
@@ -355,7 +356,7 @@ export function practiceExercise(exercise, { bar = null, bpm, normalBpm, speed =
   return {
     ...exercise, target, backing: slice(exercise.backing), groups: groupNotes(target),
     chords: [exercise.chords[bar]], bars: 1, durationTicks: exercise.barTicks,
-    sourceBar: bar + 1, playbackBpm, practiceOnly, practiceSpeed: speed, nextSpeed,
+    sourceBar: bar + 1, playbackBpm, practiceOnly, practiceSpeed: speed, nextSpeed, previousSpeed,
   };
 }
 
@@ -435,18 +436,24 @@ export class LoopScore {
   }
 }
 
+export const QUALIFYING_SCORE = 80;
+
 export class Progression {
   constructor(maxLevel, requiredStreak = 3) {
     this.level = 1;
     this.maxLevel = maxLevel;
     this.requiredStreak = requiredStreak;
     this.scores = [];
+    this.qualifyingScores = [];
   }
   get streak() {
-    return this.scores.length;
+    return this.qualifyingScores.length;
   }
   set streak(val) {
-    if (val === 0) this.scores = [];
+    if (val === 0) {
+      this.scores = [];
+      this.qualifyingScores = [];
+    }
   }
   get average() {
     return this.scores.length ? this.scores.reduce((a, b) => a + b, 0) / this.scores.length : 0;
@@ -454,25 +461,30 @@ export class Progression {
   selectLevel(level) {
     if (!Number.isInteger(level) || level < 1 || level > this.maxLevel) throw new Error('Select a level within this track’s density range.');
     this.level = level;
-    this.scores = [];
+    this.streak = 0;
   }
   submitExercise(score, exercise) {
     const nextSpeed = exercise.nextSpeed;
-    if (!this.submit(score, exercise.level, nextSpeed != null || !exercise.practiceOnly, nextSpeed == null)) return null;
-    return nextSpeed != null ? { nextSpeed } : { level: this.level };
+    if (this.submit(score, exercise.level, nextSpeed != null || !exercise.practiceOnly, nextSpeed == null)) {
+      return nextSpeed != null ? { nextSpeed } : { level: this.level };
+    }
+    if (exercise.level === this.level && exercise.previousSpeed != null &&
+      this.scores.length >= this.requiredStreak && this.average < 60) {
+      this.streak = 0;
+      return { nextSpeed: exercise.previousSpeed, slowedDown: true };
+    }
+    return null;
   }
   submit(score, level = this.level, eligible = true, advanceLevel = true) {
-    if (!eligible) { this.scores = []; return false; }
+    if (!eligible) { this.streak = 0; return false; }
     if (level !== this.level) return false;
     this.scores.push(score);
     if (this.scores.length > this.requiredStreak) this.scores.shift();
-    if (this.scores.length >= this.requiredStreak) {
-      const avg = this.scores.reduce((sum, s) => sum + s, 0) / this.scores.length;
-      if (avg >= 90) {
-        if (advanceLevel && this.level < this.maxLevel) this.level++;
-        this.scores = [];
-        return true;
-      }
+    if (score >= QUALIFYING_SCORE) this.qualifyingScores.push(score);
+    if (this.qualifyingScores.length >= this.requiredStreak) {
+      if (advanceLevel && this.level < this.maxLevel) this.level++;
+      this.streak = 0;
+      return true;
     }
     return false;
   }

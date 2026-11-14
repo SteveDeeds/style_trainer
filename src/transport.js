@@ -15,6 +15,10 @@ export class Transport {
   }
   heardPosition(now = this.now()) {
     if (this.mode !== 'play' && this.mode !== 'record') return this.position;
+    const heard = now - this.latencyMs;
+    const score = [...this.scores.values()].find(candidate =>
+      heard >= candidate.startTime && heard < candidate.endTime);
+    if (score) return (heard - score.startTime) / score.msPerTick;
     const elapsed = now - this.latencyMs - this.origin;
     if (elapsed < 0) return 0;
     if (this.finishing || !this.loop) return Math.min(this.exercise.durationTicks, (elapsed - this.cycle * this.duration) / this.msPerTick);
@@ -25,6 +29,7 @@ export class Transport {
     this.mode = mode;
     this.exercise = exercise;
     this.msPerTick = 60000 / bpm / exercise.ppq;
+    this.bpm = bpm;
     this.duration = exercise.durationTicks / exercise.ppq * 60000 / bpm;
     this.beatMs = 60000 / bpm * 4 / exercise.meter.denominator;
     this.origin = this.now() + (mode === 'record' ? this.beatMs * exercise.meter.numerator : 80);
@@ -54,8 +59,15 @@ export class Transport {
   }
   prepareScore(cycle, exercise) {
     if (this.mode === 'record' && (this.loop || cycle <= this.cycle)) {
-      const score = new LoopScore(exercise.groups, this.msPerTick, this.origin + cycle * this.duration, null, exercise.ppq);
+      const bpm = cycle > this.cycle ? this.pendingBpm ?? this.bpm : this.bpm;
+      const msPerTick = 60000 / bpm / exercise.ppq;
+      const startTime = this.origin + cycle * this.duration;
+      const score = new LoopScore(exercise.groups, msPerTick, startTime, null, exercise.ppq);
       score.exercise = exercise;
+      score.cycle = cycle;
+      score.startTime = startTime;
+      score.endTime = startTime + exercise.durationTicks * msPerTick;
+      score.msPerTick = msPerTick;
       this.scores.set(cycle, score);
     }
   }
@@ -65,8 +77,9 @@ export class Transport {
     if (enabled) this.prepareScore(this.cycle + 1, this.pending ?? this.exercise);
     else this.scores.delete(this.cycle + 1);
   }
-  queueExercise(exercise) {
+  queueExercise(exercise, bpm = this.bpm) {
     this.pending = exercise;
+    this.pendingBpm = bpm;
     this.prepareScore(this.cycle + 1, exercise);
   }
   tick() {
@@ -80,13 +93,13 @@ export class Transport {
       }
       const heard = now - this.latencyMs;
       for (const [cycle, score] of this.scores) {
-        if (heard >= this.origin + (cycle + 1) * this.duration + (score.halfTolerance ?? TIMING_TOLERANCE_MS)) {
+        if (heard >= score.endTime + (score.halfTolerance ?? TIMING_TOLERANCE_MS)) {
           this.scores.delete(cycle);
           this.onResult(score.result(), cycle + 1, score.exercise, score.inputs);
           if (this.mode === 'stop') return;
         }
       }
-      if (this.finishing && heard >= this.finishing) { this.stop(); return; }
+      if (this.finishing && heard >= this.finishing) { this.stop({ feedback: false }); return; }
     }
     if (this.waiting || this.finishing) return;
     let elapsed = now - this.origin - this.cycle * this.duration;
@@ -136,7 +149,7 @@ export class Transport {
       }
     }
     if (!this.waiting && elapsed >= this.duration) {
-      this.silence();
+      this.silence({ feedback: false });
       this.activeNotes.clear();
       this.guide([]);
       if (!this.loop) {
@@ -148,8 +161,20 @@ export class Transport {
       }
       // Do not burst missed notes after the browser has throttled the timer.
       if (elapsed > this.duration * 2) throw new Error('Playback fell behind. Keep this tab active and restart the exercise.');
+      const nextStart = this.origin + (this.cycle + 1) * this.duration;
       this.cycle++;
-      if (this.pending) { this.exercise = this.pending; this.pending = null; }
+      if (this.pending) {
+        this.exercise = this.pending;
+        this.bpm = this.pendingBpm;
+        this.pending = null;
+        this.pendingBpm = null;
+        this.msPerTick = 60000 / this.bpm / this.exercise.ppq;
+        this.duration = this.exercise.durationTicks * this.msPerTick;
+        this.beatMs = 60000 / this.bpm * 4 / this.exercise.meter.denominator;
+        this.origin = nextStart - this.cycle * this.duration;
+        this.lastBeat = null;
+      }
+      this.position = Math.max(0, (now - nextStart) / this.msPerTick);
       this.events = this.makeEvents(this.exercise);
       this.eventIndex = 0;
       this.groupIndex = 0;
@@ -188,16 +213,19 @@ export class Transport {
           .map(note => ({ score, note })));
       const match = candidates.sort((a, b) => Math.abs(a.note.time - timestamp) - Math.abs(b.note.time - timestamp))[0];
       if (match) {
-        this.feedback = { ...this.feedback, targetTick: ((match.note.time - this.origin) % this.duration) / this.msPerTick };
-        return match.score.input(pitch, timestamp);
+        this.feedback = { ...inputFeedback(match.score.expected, pitch, timestamp, match.score.halfTolerance), targetCycle: match.score.cycle,
+          targetTick: (match.note.time - match.score.startTime) / match.score.msPerTick };
+        const accepted = match.score.input(pitch, timestamp);
+        this.feedback.credit = match.note.credit;
+        return accepted;
       }
-      const cycle = Math.floor((timestamp - this.origin) / this.duration);
-      this.scores.get(cycle)?.input(pitch, timestamp);
+      const score = activeScores.find(candidate => timestamp >= candidate.startTime && timestamp < candidate.endTime);
+      score?.input(pitch, timestamp);
       return timestamp < this.origin - tolerance ? null : false;
     }
     return null;
   }
-  stop() {
+  stop({ feedback = true } = {}) {
     clearInterval(this.timer);
     this.activeNotes.clear();
     this.mode = 'stop';
@@ -206,9 +234,10 @@ export class Transport {
     this.waiting = null;
     this.finishing = null;
     this.pending = null;
+    this.pendingBpm = null;
     this.feedback = null;
     this.held.clear();
-    this.silence();
+    this.silence({ feedback });
     this.guide([]);
     this.onState();
   }

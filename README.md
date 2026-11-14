@@ -48,13 +48,27 @@ Downloads can be cancelled or retried. Storage errors are reported; audio can
 still work for the current session without saved bytes. Browser storage can be
 cleared or evicted and is not shared between browsers/devices. The app does not
 silently install files under a user folder, upload imported files, or promise
-offline application operation. Only the hosted starter bank is cached;
-uploaded styles and SoundFonts are not copied into storage. Remembered folder
+offline application operation. The hosted starter bank can be cached, and a
+local copy of the last loaded style (including imported styles) is saved in
+IndexedDB for the next visit. Loading another style replaces that one copy;
+auditioning a library entry does not replace it. The style restores while stopped,
+without requiring its original file or folder. Imported SoundFonts are not
+copied into storage. Clear browser site data to remove the remembered style.
+Storage/restore failures are reported, and manual style loading remains available.
+Remembered folder
 handles allow styles to be read again from the chosen directory with permission.
 
 Use current desktop Chrome or Edge for Web MIDI and a connected controller.
 GitHub Pages provides HTTPS; MIDI permission and a user gesture for audio are
 still required. On-screen keys are available without a MIDI device.
+After the first successful **Connect MIDI**, the selected input and LED output
+are remembered in this browser, including an explicit Off selection. On later
+visits the app reconnects automatically only if MIDI permission is already
+granted; otherwise use **Connect MIDI**. It prefers the saved port ID, or a
+unique matching name and manufacturer if the ID changed. Missing devices are
+not replaced with an unrelated controller; plugging the remembered device
+back in reconnects it. Automatic reconnection does not start audio, download
+sounds, or open a permission prompt.
 Once sounds are loaded (or Preview is explicitly enabled), MIDI notes are
 audible in every mode, including Stop. Correct and incorrect pitches both use
 the selected practice track's instrument; accuracy changes notation/feedback,
@@ -75,6 +89,12 @@ sound one octave below their written pitch; drums retain their assigned
 sound. These auditions do not score input or advance a level. Load sounds or
 enable Preview synth first; if sound setup opens, repeat the selection/click
 after choosing sounds.
+
+Hi-hats use distinct notation symbols: **X** for closed hi-hat (MIDI 42),
+a **diamond below the staff** for pedal hi-hat (MIDI 44), and a **circled X**
+for open hi-hat (MIDI 46). A key beneath drum notation explains these symbols;
+hovering a notehead identifies its MIDI key. These display changes do not
+change the controller keys, sounds, or scoring.
 
 The **88-key piano** below the score is a display-only indicator, not a touch
 keyboard. It always shows the full A0-C8 range (MIDI 21-108). Green keys show
@@ -103,10 +123,12 @@ and the supplied SoundFont. Launch using **Tasks: Run Task → Style Trainer: de
 in VS Code, or:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run.ps1 dev
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1
 ```
 
-The same launcher accepts `test`, `build`, `publish`, `preview`, and `install`. It uses the
+The root `start.ps1` starts the local development server; press Ctrl+C to stop it.
+It delegates to `scripts\run.ps1`, which also accepts `test`, `build`, `publish`,
+`preview`, and `install`. It uses the
 local runtime when available, otherwise Node on PATH. For a fresh checkout with
 Node already installed:
 
@@ -215,7 +237,7 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
 
 - **Debug level selection:** while stopped, click any density level tile to
   inspect/practice that layer without earning it first. This resets recent scores
-  and the qualifying streak. Tiles are disabled during playback or asset loading.
+  and the qualifying-loop count. Tiles are disabled during playback or asset loading.
 - **Style section:** the dropdown beneath the active style name selects parsed
   Yamaha sections such as Main A, Intro B, Fill, or Ending. The demo only contains
   Main A; available sections depend on the loaded file.
@@ -254,7 +276,7 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
   Changing style, section or parent bar count restores original harmony.
   **Restore harmony** also returns to the untouched source.
   Randomized exercises count toward level-up at full-pattern, normal-speed
-  settings. Changing harmony resets the qualifying streak while preserving
+  settings. Changing harmony resets the qualifying-loop count while preserving
   unlocked levels. One-bar drills remain practice-only; reduced-speed full
   patterns can advance through the speed ladder described below.
   One-bar drills use that original pattern bar's
@@ -264,38 +286,63 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
 - **Record**: audible one-bar count-in and a steady metronome, continuous real-time
   loops, target part muted.
   MIDI note-on timestamps are matched one-to-one against target pitches within
-  **±100 ms**, including hits just before or after a loop boundary. Note-offs are
+  **±1/16 note** (half credit), with full credit within **±1/32 note**,
+  shown as **blue for close (half credit)** and **green for perfect (full credit)**.
+  Hits just before or after a loop boundary are included. An early downbeat in
+  the last bar belongs to the next loop, and its correct-note highlight
+  remains visible when that loop starts. Note-offs are
   not scored. Duplicate same-pitch targets at one onset are one required input.
-  Accuracy is `hits / (expected notes + extra inputs) × 100`.
+  Accuracy is `credited points / (expected notes + extra inputs) × 100`.
   Recent six loops' scores and raw note-on timestamps/timing offsets are held in
   browser memory; they are not uploaded or saved as MIDI files.
 - **Stop** resets the position and silences audio and LED feedback.
 - **Loop** defaults to on; switching it off finishes the current pass, including
-  the quiz's final 100 ms scoring grace window.
-- Three consecutive eligible loops with **≥90%** stop automatically after scoring
-  the third loop (including its 100 ms grace window), play a congratulations
-  chime, and unlock the next density layer. The next level is shown while stopped;
-  start Play, Step, or Record when ready. At the top level the same streak stops
-  and celebrates mastery without exceeding the maximum level.
-  Failed loops reset the streak. Changing style, section, track, or pattern
+  the quiz's final ±1/16-note scoring grace window.
+- **Three eligible loops each scoring ≥80%** unlock the next density
+  layer without stopping recording. Changes take effect at the next loop boundary
+  after scoring, with no new count-in. At the top level,
+  the same three qualifying loops celebrate mastery and keep going without
+  exceeding the maximum. These loops **do not need to be consecutive**: lower
+  scores do not remove earned qualifying loops, and a high average alone does
+  not count as three qualifying loops.
+  Each changed speed or density starts a fresh qualifying-loop count; results
+  from the outgoing settings do not count toward the new settings.
+  Changing style, section, track, or pattern
   length reloads that section/track's saved density and resets its qualifying
-  streak; stopping or switching modes also breaks the streak.
+  count; stopping or switching modes also resets the count.
 - **Loop range** selects any one bar of the current 1–8-bar pattern, including
   the last bar. Notes and backing are clipped to that bar and repeated. Notes
   sustained across its starting boundary begin at the drill's start.
 - **Practice speed** selects 25%, 50%, 75%, 90%, or 100% of the header BPM.
   At full-pattern settings with the header BPM at least the section's original
-  BPM, **50% → 75% → 100%** is a speed ladder. Three consecutive Record loops
-  at **≥90%** stop and celebrate, select the next speed, and keep the same
-  density level. Press Record to start a fresh three-loop streak at that speed.
-  At 100%, three qualifying loops pass the density level (or celebrate mastery)
+  BPM, **50% → 75% → 100%** is a speed ladder. Three loops individually scoring
+  **≥80%**, not necessarily consecutively, queue the next speed with a spoken encouragement sample, keeping the same
+  density level and recording continuously.
+  At 100%, the three qualifying loops pass the density level (or celebrate mastery)
   exactly as when starting directly at 100%. The next density stays at 100%;
-  select a slower speed manually to work up again.
+  a three-loop average **below 60%** automatically eases the tempo one step
+  (**100% → 75% → 50%**) with a spoken slowdown sample. Slowdowns preserve the density
+  level and never go below 50%. At exactly 60% the tempo stays unchanged.
   Single-bar drills, a lowered header BPM, and manual 25%/90% speeds remain
-  practice-only with no automatic advancement. Failed loops reset the streak.
-  Tempo and drill changes preserve unlocked levels and reset the streak;
+  practice-only with no automatic advancement or slowdown.
+  Tempo and drill changes preserve unlocked levels and reset the qualifying count;
   practice controls can be changed while stopped. Randomized harmony is also
-  eligible for the speed ladder.
+  eligible for the speed ladder. With **Loop off**, the current pass still
+  finishes and stops normally; automatic progression never forces looping on.
+- **Encouragement samples** in `public/samples` replace synthesized achievement
+  noises. Each eligible pattern of four bars or more scoring **80% or higher**
+  lights one of the three green progress LEDs. The first two qualifying loops
+  play a short "huh" or "yeah"; the third lights all three LEDs and plays a
+  longer "let's go" or "yeah like that" achievement phrase. All three LEDs stay
+  lit until the new speed or density applies, then reset for the next achievement.
+  Below-threshold loops do not play an achievement clip or remove earned LEDs.
+  Tempo increases use "bring it up" or "come on"; slowdowns use "drop it back",
+  "drop it down", or "lay back". Density changes alone do not play a tempo-change
+  phrase. Each group varies its clips without repeating
+  the last selection. Samples preload before Record, follow master volume,
+  survive loop boundaries, and stop on explicit Stop. Only one encouragement
+  clip plays at a time. Loading failures are shown rather than replaced with
+  synthesized noises. The public build stages the same named samples.
 - Optional on-screen note pads support touch, mouse, and the keyboard shortcut printed
   on each pad. Hold keys together for a chord. Pad shortcuts follow the next
   target shape and are a learning aid, not blind sight-reading assessment.
@@ -361,7 +408,7 @@ The main screen prioritizes the score rather than setup cards. The compact
 header contains style, section, practice track, key/source chord, base tempo
 and pattern length. The practice toolbar keeps speed, range, Solo and Click
 visible. Click the density indicators while stopped to inspect any level.
-Accuracy, qualifying streak, next achievement and effective BPM sit above the
+Accuracy, qualifying-loop count, next achievement and effective BPM sit above the
 notation. Play/Step/Record/Stop/Loop and volume remain in the fixed bottom bar.
 
 - **Change style** opens the categorized library, explicit Load button,

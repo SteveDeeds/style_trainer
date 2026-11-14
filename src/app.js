@@ -1,6 +1,6 @@
 import './style.css';
 import { createDemo, parseMidi } from './midi.js';
-import { buildExercise, buildStylePreview, initialHarmony, LAYERS, medianTimingOffset, partOf, pitchName, practiceExercise, Progression, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
+import { buildExercise, buildStylePreview, initialHarmony, LAYERS, medianTimingOffset, partOf, pitchName, practiceExercise, Progression, QUALIFYING_SCORE, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
 import { AudioEngine, monitorNote } from './audio.js';
 import { MidiController } from './controller.js';
 import { Notation } from './notation.js';
@@ -9,7 +9,7 @@ import { Transport } from './transport.js';
 import { sourceHarmony } from './yamaha.js';
 import { assetUrl } from './assets.js';
 import { clearSavedSounds, downloadSounds, readSavedSounds, saveSounds, validateStarter } from './soundfont-cache.js';
-import { folderPermission, forgetStyleFolder, readStyleEntry, readStyleFolder, saveStyleFolder, scanStyleFolder, stylesFromFiles } from './style-folder.js';
+import { folderPermission, forgetStyleFolder, readLastStyle, readStyleEntry, readStyleFolder, saveLastStyle, saveStyleFolder, scanStyleFolder, stylesFromFiles } from './style-folder.js';
 import { buildMasteryView, leafProgress, loadMastery, qualifiesForDetailedMastery, recordAdvancementToMastery, recordLoopToMastery, registerStyleCatalog, saveMastery, TROPHIES } from './mastery.js';
 
 const icons = {
@@ -48,8 +48,9 @@ document.querySelector('#app').innerHTML = `
         <div id="layers" class="layer-progress"></div>
       </section>
       <div class="score-heading"><div class="mode-summary"><span class="status-dot" id="status-dot"></span><strong id="mode-label">Ready when you are</strong><span id="mode-description">Choose a mode below to begin</span></div><div class="measure-display"><span id="measure">BAR 01 / 04</span><span id="beat-dots" class="beat-dots"></span></div></div>
-      <div class="progress-summary"><strong id="accuracy" aria-label="Latest loop accuracy">—<small>%</small></strong><span id="streak-label">90%+ for 3 loops to level up</span><div id="streak" class="streak"></div></div>
+      <div class="progress-summary"><strong id="accuracy" aria-label="Latest loop accuracy">—<small>%</small></strong><span id="streak-label">${QUALIFYING_SCORE}%+ for 3 loops to level up</span><div id="streak" class="streak"></div></div>
       <div id="practice-status" class="practice-status">Full pattern · eligible for level-up</div>
+      <div class="timing-legend" aria-label="Note timing colors"><span class="timing-perfect">Green: perfect · full credit</span><span class="timing-close">Blue: close · half credit</span></div>
       <div id="notation" class="notation" aria-live="off"></div>
       <section class="piano-panel" aria-label="Piano note indicator">
         <div class="piano-heading"><strong>88-key piano</strong><span><i class="piano-target-swatch"></i> Target notes <i class="piano-held-swatch"></i> Held input</span><span>Display only · A0 to C8</span></div>
@@ -112,7 +113,7 @@ document.querySelector('#app').innerHTML = `
     <label>Progression key <select id="harmony-key" aria-label="Chord progression key">${['Cb', 'Gb', 'Db', 'Ab', 'Eb', 'Bb', 'F', 'C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'Abm', 'Ebm', 'Bbm', 'Fm', 'Cm', 'Gm', 'Dm', 'Am', 'Em', 'Bm', 'F#m', 'C#m', 'G#m', 'D#m', 'A#m'].map(key => `<option value="${key}">${key.endsWith('m') ? key.slice(0, -1) + ' minor' : key + ' major'}</option>`).join('')}</select></label>
     <p id="harmony-summary">Original harmony</p>
     <div class="drawer-actions"><button id="randomize-chords" class="small-button">Randomize chords</button><button id="restore-chords" class="small-button" disabled>Restore harmony</button></div>
-    <p>One chord per bar. Changing harmony resets the streak, not unlocked levels. Full-pattern randomized exercises qualify for speed and level advancement.</p>
+    <p>One chord per bar. Changing harmony resets the qualifying-loop count, not unlocked levels. Full-pattern randomized exercises qualify for speed and level advancement.</p>
   </section>
   <footer class="transport-shell"><div class="transport-inner"><span id="transport-caption" class="transport-caption">Start with a little listening.</span><nav class="transport" aria-label="Transport and practice modes"><button id="play" class="mode-button play-button" aria-pressed="false">${icon('play')}<span>PLAY<small>Listen</small></span></button><button id="step" class="mode-button" aria-pressed="false">${icon('step')}<span>STEP<small>Wait for notes</small></span></button><button id="record" class="mode-button record-button" aria-pressed="false">${icon('record')}<span>RECORD<small>Test yourself</small></span></button><button id="stop" class="mode-button stop-button" aria-pressed="true">${icon('stop')}<span>STOP<small>Reset</small></span></button><button id="loop" class="loop-button" aria-pressed="true">${icon('loop')}<span>LOOP: ON</span></button></nav><label class="volume-label">Volume <input id="volume" type="range" min="0" max="100" value="65" aria-label="Volume"></label></div></footer>
   <dialog id="mastery-dialog" class="setup-drawer mastery-showcase" aria-labelledby="mastery-dialog-title">
@@ -144,11 +145,12 @@ document.querySelector('#app').innerHTML = `
   </dialog>
   <dialog id="help-dialog"><div class="dialog-heading"><h2>Find your groove.</h2><button id="close-help" aria-label="Close practice guide">×</button></div>
     <p><b>Play</b> loops the target arrangement and lights MIDI notes. <b>Step</b> freezes at each target onset until you play the pitches. Hold melodic shapes together; drum hits can be tapped in sequence. <b>Record</b> gives a one-bar count-in, mutes your target part, and scores each loop.</p>
-    <p>Timing accuracy uses musical subdivision tolerances: hits within <b>±1/32 note</b> receive a perfect score (1.0 credit). Hits within <b>±1/16 note</b> receive half score (0.5 credit). Notes worse than ±1/16 note receive no credit and count as extra notes. Wrong pitches count against you. Achieve a <b>rolling average of 90% or higher across the last three recorded loops</b> to advance to the next level or increase speed! A flawless 100% loop triggers an arpeggiated fanfare and awards stars and crowns in your Trophy Case.</p>
+    <p>Timing accuracy uses musical subdivision tolerances: <b>green</b> notes within <b>±1/32 note</b> receive full credit; <b>blue</b> notes within <b>±1/16 note</b> receive half credit. Notes worse than ±1/16 note receive no credit and count as extra notes. Wrong pitches count against you. Score <b>${QUALIFYING_SCORE}% or higher on three recorded loops</b> to advance to the next level or increase speed. They do not need to be consecutive; lower scores keep your earned qualifying loops. Each qualifying pattern of four bars or more lights a progress LED and plays "huh" or "yeah". The third lights all three LEDs and plays a longer phrase, "let's go" or "yeah like that", before progress resets at the next speed or density. Perfect scores also count toward stars and crowns in your Trophy Case.</p>
     <p><b>Mastery & Trophies</b> opens a wide showcase with separate Style Mastery and Trophy Case tabs. Expand a style to see section badges and every playable instrument. Master all Bass or Drums tracks for its family indicator; master every playable section/instrument combination for the Style Hero reward. Silent combinations do not count, and returning to a track resumes its saved density. Older aggregate scores remain labeled as legacy history rather than being assigned to an instrument.</p>
-    <p><b>Range</b> lets you drill any individual bar. At full-pattern settings and the original base BPM, <b>Speed</b> advances through 50% → 75% → 100% after achieving a 90%+ average over three loops. Each achievement stops and celebrates; start again when ready. At 100%, the same streak passes the density level. Single-bar drills, 25%/90% speeds and a lowered base BPM remain practice-only.</p>
+    <p><b>Range</b> lets you drill any individual bar. At full-pattern settings and the original base BPM, <b>Speed</b> advances through 50% → 75% → 100% after three loops each scoring ${QUALIFYING_SCORE}% or higher, not necessarily in a row. Recording continues: "bring it up" or "come on" signals a tempo increase at a loop boundary. An average below 60% over the last three loops slows one step (100% → 75% → 50%) with a "drop" or "lay back" sample, keeping your density level. At 100%, three qualifying loops pass the density level without a tempo-change cue. Changing tempo or density starts a fresh qualifying-loop count. Single-bar drills, 25%/90% speeds and a lowered base BPM remain practice-only. Loop off still finishes one pass and stops.</p>
     <p>The score emphasizes <b>note attacks</b>: short release rests can become a longer note, with a staccato dot for clearly short articulation. Meaningful rests remain. Ties are reserved for beat/bar boundaries; no automatic tenuto or legato is inferred. Audio and scoring retain source timing.</p>
     <p><b>Change style</b> opens the local library, import and demo controls. <b>Devices & audio</b> contains MIDI ports, SoundFont loading, Preview synth, click sound and diagnostics. <b>Chord progression</b> offers key selection, randomization and restore. Enable <b>On-screen keys</b> for playable pads; MIDI works with them hidden. Click a level indicator while stopped to inspect any density.</p>
+    <p>Your last loaded style is saved in this browser and restored while stopped, even if its original file or folder is unavailable. Previewing a style does not replace that saved copy. Selected MIDI input and LED output ports are remembered too, including Off. After the first connection, MIDI reconnects automatically when permission is already granted or the remembered device is plugged back in. Otherwise use <b>Connect MIDI</b>. Automatic restoration never starts playback or loads sounds.</p>
     <p>Files are processed locally. Yamaha CASM source chords, NTR/NTT rules, guitar-tuning voicing, pitch limits and RTR note actions guide randomized-harmony playback; ordinary MIDI uses inferred harmony. Guitar voicing is an approximation, not Yamaha firmware's proprietary generator. NOTE GENERATOR RTR requires style-specific data not carried by the imported MIDI and is reported as unsupported. Pitch-shift RTR uses one synth channel per sustained voice and reports exhaustion. Tempo is fixed to the selected BPM. Notation quantizes to sixteenths; scoring uses original timing.</p>
     <p>Use Chrome or Edge on localhost/HTTPS for MIDI. For Launchpad X LEDs, choose LPX MIDI (second Windows interface) and a compatible Lighting Custom layout. Channel 1 provides steady colour. No SysEx is sent. Generic MIDI keyboards may not support LEDs.</p>
     <p>The supplied JJazzLab SF2 is large (~340 MiB). The first load may take a few seconds. Use a smaller licensed GM SF2 or explicitly select Preview synth for lightweight practice. Preview audio is not GM-quality.</p>
@@ -181,6 +183,9 @@ let libraryFailure = null;
 let savedStarterAvailable = false;
 let history = [];
 let lastPadKey = '';
+let completedQualifyingScores = null;
+let styleSelection = 0;
+let lastStyleSave = Promise.resolve();
 const pressedKeys = new Map();
 const pointerNotes = new Map();
 const inputNotes = new Map();
@@ -305,17 +310,13 @@ const transport = new Transport({
       controller.light(pitch, true);
     }
   },
-  silence: () => { audio.silence(); inputNotes.clear(); litCounts.clear(); controller.clear(); },
+  silence: options => { audio.silence(options); inputNotes.clear(); litCounts.clear(); controller.clear(); },
   guide: pitches => controller.guide(pitches),
   onState: () => updateTransport(),
   onResult: (result, loop, scoredExercise, inputs) => {
     history.push({ ...result, loop, level: scoredExercise.level, inputs, practiceOnly: scoredExercise.practiceOnly, speed: scoredExercise.practiceSpeed, tempoEligible: scoredExercise.nextSpeed != null });
     history = history.slice(-6);
     $('calibrate-latency').disabled = medianTimingOffset(inputs) === null;
-
-    if (result.score >= 100) {
-      audio.perfectFanfare();
-    }
 
     registerStyleCatalog(mastery, currentMasteryCatalog);
     const masteryContext = {
@@ -338,8 +339,24 @@ const transport = new Transport({
     persistMastery();
     const unlockedTrophies = [...loopRes.unlocked];
 
-    const advancement = progression.submitExercise(result.score, scoredExercise);
-    if (advancement) {
+    // Results arrive after the next loop has started; ignore old settings while a change is pending.
+    const canSubmit = !transport.pending && scoredExercise === transport.exercise;
+    if (canSubmit) completedQualifyingScores = null;
+    const previousQualifyingScores = [...progression.qualifyingScores];
+    const advancement = canSubmit ?
+      progression.submitExercise(result.score, scoredExercise) : null;
+    if (advancement && !advancement.slowedDown) {
+      completedQualifyingScores = [...previousQualifyingScores, result.score];
+      if (scoredExercise.bars >= 4) audio.encourage('advance');
+    } else if (canSubmit && result.score >= QUALIFYING_SCORE && scoredExercise.bars >= 4 &&
+      (scoredExercise.nextSpeed != null || !scoredExercise.practiceOnly)) {
+      audio.encourage('qualifying');
+    }
+    if (advancement?.slowedDown) {
+      $('practice-speed').value = String(advancement.nextSpeed);
+      queuePracticeChange(makeExercise());
+      notify(`Let's ease the tempo: three-loop average below 60%. Speed drops to ${advancement.nextSpeed}% at the next loop; density stays at level ${progression.level}.`);
+    } else if (advancement) {
       const leveledUp = progression.level > scoredExercise.level;
       const isMastered = qualifiesForDetailedMastery({
         completedLevel: scoredExercise.level,
@@ -347,15 +364,9 @@ const transport = new Transport({
         nextLevel: progression.level,
         nextSpeed: advancement.nextSpeed,
       });
-      transport.stop();
       if (advancement.nextSpeed) $('practice-speed').value = String(advancement.nextSpeed);
-      exercise = makeExercise();
-      notation.render(exercise, notationKey());
-      lastPadKey = '';
-      updateDensity();
-      updateExerciseDescription();
-      if (result.score < 100) {
-        audio.celebrate();
+      if (advancement.nextSpeed || leveledUp) {
+        queuePracticeChange(makeExercise());
       }
 
       const advRes = recordAdvancementToMastery(mastery, {
@@ -375,9 +386,9 @@ const transport = new Transport({
       persistMastery();
       unlockedTrophies.push(...advRes.unlocked);
 
-      notify(advancement.nextSpeed ? `Congratulations! Rolling 3-loop average reached 90% or higher at ${scoredExercise.practiceSpeed}%. Speed increased to ${advancement.nextSpeed}% at level ${progression.level} — press Play, Step or Record when ready.` :
-        leveledUp ? `Congratulations! Rolling 3-loop average reached 90% or higher. Level ${progression.level} unlocked — press Play, Step or Record when ready.` :
-        'Congratulations! Rolling 3-loop average reached 90% or higher on the top level. Pattern mastered!');
+      notify(advancement.nextSpeed ? `Congratulations! Three loops scored ${QUALIFYING_SCORE}% or higher at ${scoredExercise.practiceSpeed}%. Speed increases to ${advancement.nextSpeed}% at the next loop, at level ${progression.level}. Keep playing!` :
+        leveledUp ? `Congratulations! Three loops scored ${QUALIFYING_SCORE}% or higher. Level ${progression.level} unlocked for the next loop. Keep playing!` :
+        `Congratulations! Three loops scored ${QUALIFYING_SCORE}% or higher on the top level. Pattern mastered! Keep playing.`);
     }
 
     if (unlockedTrophies.length > 0) {
@@ -395,11 +406,11 @@ const transport = new Transport({
   onLoop: cycle => {
     notation.clearFeedback();
     if (exercise !== transport.exercise) {
-      exercise = transport.exercise;
-      notation.render(exercise, notationKey());
-      lastPadKey = '';
-      updateDensity();
-      updateExerciseDescription();
+      showPracticeChange(transport.exercise);
+    }
+    const score = transport.scores.get(transport.cycle);
+    for (const note of score?.expected ?? []) {
+      if (note.hit) notation.feedback(note.pitch, (note.time - score.startTime) / score.msPerTick, true, note.credit);
     }
     $('loop-count').textContent = `Loop ${cycle}`;
   },
@@ -407,6 +418,27 @@ const transport = new Transport({
   onBeat: accent => audio.click(accent),
 });
 
+function showPracticeChange(nextExercise, cue = true) {
+  if (transport.loop) completedQualifyingScores = null;
+  if (cue && nextExercise.playbackBpm !== exercise.playbackBpm) {
+    audio.tempoChange(nextExercise.playbackBpm < exercise.playbackBpm ? 'down' : 'up');
+  }
+  exercise = nextExercise;
+  notation.render(exercise, notationKey());
+  lastPadKey = '';
+  updateDensity();
+  updateExerciseDescription();
+  updateProgress();
+}
+function queuePracticeChange(nextExercise) {
+  if (transport.loop) transport.queueExercise(nextExercise, nextExercise.playbackBpm);
+  else showPracticeChange(nextExercise);
+}
+function stopPractice() {
+  const pending = transport.pending;
+  transport.stop();
+  if (pending) showPracticeChange(pending, false);
+}
 function makeExercise() {
   const section = Number($('section').value);
   const full = buildExercise(style, { section, bars: Number($('bars').value), trackId: $('focus').value, level: progression.level, harmony: randomizedHarmony });
@@ -439,6 +471,7 @@ function updateExerciseDescription() {
   $('harmony-summary').textContent = exercise.chords.filter(Boolean).join(' → ') || 'No source chord available';
 }
 function resetProgress() {
+  completedQualifyingScores = null;
   progression = new Progression(trackLayers().length);
   const saved = leafProgress(mastery, selectedMasteryContext());
   const savedLevel = Math.max(1, Math.min(progression.maxLevel, saved.highestLevel || 1));
@@ -469,7 +502,7 @@ function rebuild() {
   }
   updateProgress();
 }
-function setStyle(next) {
+function setStyle(next, { remember = true } = {}) {
   stopAudition();
   style = next;
   $('section').replaceChildren(...style.sections.map((s, i) => new Option(s.name, i)));
@@ -485,6 +518,29 @@ function setStyle(next) {
   updatePracticeBars();
   resetProgress();
   rebuild();
+  if (remember) {
+    styleSelection++;
+    const snapshot = structuredClone(next);
+    lastStyleSave = lastStyleSave.then(() => saveLastStyle(snapshot)).catch(error => {
+      console.warn(error);
+      notify(`Style is loaded, but could not be remembered for next visit: ${error.message}`, true);
+    });
+  }
+}
+async function restoreLastPracticeStyle() {
+  const selection = styleSelection;
+  const request = startRequest;
+  try {
+    const saved = await readLastStyle();
+    if (!saved || selection !== styleSelection || request !== startRequest || busy || transport.mode !== 'stop') return;
+    buildExercise(saved);
+    setStyle(saved, { remember: false });
+    notify(`Welcome back! Restored ${saved.name}. Choose Play, Step or Record when ready.`);
+  } catch (error) {
+    if (selection === styleSelection) {
+      reportError(new Error(`Could not restore the last style. Load it again from Change style: ${error.message}`));
+    }
+  }
 }
 function updateTracks(preferred = $('focus').value) {
   const section = style.sections[Number($('section').value)];
@@ -559,9 +615,10 @@ function updateDensity() {
       if (busy || transport.mode !== 'stop') return;
       try {
         progression.selectLevel(i + 1);
+        completedQualifyingScores = null;
         history = [];
         rebuild();
-        notify(`Debug: level ${i + 1} selected. Scores and qualifying streak reset.`);
+        notify(`Debug: level ${i + 1} selected. Scores and qualifying-loop count reset.`);
       } catch (error) { reportError(error); }
     });
     element.innerHTML = `<span>${i + 1 < progression.level ? '✓' : String(i + 1).padStart(2, '0')}</span>`;
@@ -574,8 +631,9 @@ function updateDensity() {
 function updateProgress() {
   const result = history.at(-1);
   $('accuracy').innerHTML = result ? `${Math.round(result.score)}<small>%</small>` : '—<small>%</small>';
-  $('score-status').textContent = result ? result.score >= 90 ? 'Right in the pocket.' : 'Every loop is a fresh start.' : 'Your next personal best awaits';
-  $('score-detail').textContent = result ? `${result.hits} / ${result.total} notes · ${result.extra} extra · Loop ${result.loop}` : 'Record a loop to see your accuracy.';
+  $('score-status').textContent = result ? result.score >= QUALIFYING_SCORE ? 'Right in the pocket.' : 'Every loop is a fresh start.' : 'Your next personal best awaits';
+  const closeHits = result?.inputs.filter(input => input.credit === .5).length ?? 0;
+  $('score-detail').textContent = result ? `${result.hits} / ${result.total} notes · ${result.hits - closeHits} perfect · ${closeHits} close · ${result.extra} extra · Loop ${result.loop}` : 'Record a loop to see your accuracy.';
   if (!result) {
     $('score-diagnostic').textContent = 'Pitch and timing feedback appears after each recorded loop.';
   } else if (!result.inputs.length) {
@@ -594,28 +652,31 @@ function updateProgress() {
     if (duplicates) details.push(`${duplicates} repeated presses`);
     $('score-diagnostic').textContent = details.join(' · ');
   }
-  const avg = Math.round(progression.average);
-  const count = progression.streak;
-  const avgText = count > 0 ? `Avg: ${avg}% (${count}/3 loops)` : '0/3 loops';
-  $('streak-label').textContent = exercise?.nextSpeed != null ? `${avgText} · 90%+ avg to increase speed to ${exercise.nextSpeed}%` :
+  const qualifyingScores = completedQualifyingScores ?? progression.qualifyingScores;
+  const count = qualifyingScores.length;
+  const progressText = `${count}/3 loops at ${QUALIFYING_SCORE}%+ (not necessarily consecutive)`;
+  $('streak-label').textContent = completedQualifyingScores ? `${progressText} · ${transport.pending ? 'advancing at the next loop' : 'achievement complete'}` :
+    exercise?.nextSpeed != null ? `${progressText} · increase speed to ${exercise.nextSpeed}%` :
     exercise?.practiceOnly ? 'Practice only — these scores do not count toward level-up' :
-    `${avgText} · 90%+ avg to ${progression.level === progression.maxLevel ? 'master this pattern' : 'advance'}`;
+    `${progressText} · ${progression.level === progression.maxLevel ? 'master this pattern' : 'advance'}`;
   $('streak').replaceChildren(...Array.from({ length: 3 }, (_, i) => {
     const dot = document.createElement('i');
-    if (i < progression.scores.length) {
-      const score = progression.scores[i];
-      dot.className = score >= 90 ? 'filled pass' : 'filled';
-      if (score >= 100) dot.classList.add('perfect');
-      dot.title = `Loop ${i + 1}: ${Math.round(score)}%`;
+    if (i < qualifyingScores.length) {
+      const score = qualifyingScores[i];
+      dot.className = 'filled pass';
+      dot.title = `Qualifying loop ${i + 1}: ${Math.round(score)}%`;
     }
     return dot;
   }));
+  $('streak').classList.toggle('complete', count === 3);
+  $('streak').setAttribute('role', 'img');
+  $('streak').setAttribute('aria-label', `${count} of 3 qualifying loops`);
   $('score-history').replaceChildren(...history.map(r => {
     const span = document.createElement('span');
     span.textContent = `${Math.round(r.score)}%${r.score >= 100 ? ' ⭐' : ''}${r.tempoEligible ? ` · ${r.speed}% speed` : r.practiceOnly ? ' · drill' : ''}`;
     span.title = `Loop ${r.loop}: ${r.hits} of ${r.total}, ${r.extra} extra`;
     if (r.score >= 100) span.className = 'pass perfect';
-    else if (r.score >= 90) span.className = 'pass';
+    else if (r.score >= QUALIFYING_SCORE) span.className = 'pass';
     return span;
   }));
 }
@@ -739,11 +800,11 @@ function handleInput(pitch, on, velocity = 90, timestamp = performance.now()) {
   }
   const group = currentGroup();
   const result = transport.input(pitch, on, timestamp);
-  if (on && result !== null) {
+  if (on && result !== null && (result !== true || transport.mode !== 'record' || transport.feedback.targetCycle === transport.cycle)) {
     const tick = transport.mode === 'record' && result === true ? transport.feedback.targetTick :
       transport.mode === 'step' ? group?.tick ?? transport.position :
         ((timestamp - transport.latencyMs - transport.origin) % transport.duration + transport.duration) % transport.duration / transport.msPerTick;
-    notation.feedback(pitch, tick, result === true);
+    notation.feedback(pitch, tick, result === true, transport.mode === 'record' ? transport.feedback.credit : 1);
   }
   if (on) {
     $('received-note').textContent = `Received ${pitchName(pitch)} · MIDI ${pitch} · velocity ${velocity}`;
@@ -752,7 +813,7 @@ function handleInput(pitch, on, velocity = 90, timestamp = performance.now()) {
     const shape = expected.map(p => `${pitchName(p)} (${p})`).join(' + ');
     $('input-feedback').classList.toggle('input-miss', result === false);
     if (feedback?.reason === 'hit') {
-      $('input-feedback').textContent = `Matched · ${Math.round(Math.abs(feedback.offsetMs))} ms ${feedback.offsetMs < 0 ? 'early' : 'late'}`;
+      $('input-feedback').textContent = `${feedback.credit === .5 ? 'Close · half credit' : 'Perfect · full credit'} · ${Math.round(Math.abs(feedback.offsetMs))} ms ${feedback.offsetMs < 0 ? 'early' : 'late'}`;
     } else if (feedback?.reason === 'timing') {
       $('input-feedback').textContent = `Correct pitch, but ${Math.round(Math.abs(feedback.offsetMs))} ms ${feedback.offsetMs < 0 ? 'early' : 'late'} · required ±${TIMING_TOLERANCE_MS} ms`;
     } else if (feedback?.reason === 'duplicate') {
@@ -1092,11 +1153,13 @@ async function start(mode) {
       return;
     }
     await ensureAudio();
+    if (mode === 'record') await audio.loadEncouragement();
     if (request !== startRequest) return;
     busy = false;
     const bpm = Number($('bpm').value);
     if (!Number.isFinite(bpm) || bpm < 30 || bpm > 240) throw new Error('Tempo must be between 30 and 240 BPM.');
-    // Preserve unlocked layers across transport changes, but require consecutive quiz loops.
+    // Keep unlocked layers, but start a new set of qualifying loops for this recording.
+    completedQualifyingScores = null;
     progression.streak = 0;
     $('loop-count').textContent = 'Loop 1';
     updateProgress();
@@ -1122,7 +1185,8 @@ $('stop').addEventListener('click', () => {
   startRequest++;
   pendingMode = null;
   soundLoad?.abort();
-  transport.stop();
+  stopPractice();
+  completedQualifyingScores = null;
   progression.streak = 0;
   updateProgress();
   notify('Stopped. Loop position reset — ready for another round.');
@@ -1191,6 +1255,7 @@ function changeHarmony(next) {
     throw error;
   }
   progression.streak = 0;
+  completedQualifyingScores = null;
   history = [];
   rebuild();
   updateTransport();
@@ -1205,7 +1270,7 @@ $('randomize-chords').addEventListener('click', () => {
 });
 $('restore-chords').addEventListener('click', () => {
   if (busy || transport.mode !== 'stop') return;
-  try { changeHarmony(null); notify('Original style harmony restored. Qualifying streak reset.'); }
+  try { changeHarmony(null); notify('Original style harmony restored. Qualifying-loop count reset.'); }
   catch (error) { reportError(error); }
 });
 $('harmony-key').addEventListener('change', () => {
@@ -1224,7 +1289,7 @@ for (const id of ['focus', 'bars', 'section', 'bpm']) $(id).addEventListener('ch
       updateTracks();
     }
     if (id === 'bars') updatePracticeBars();
-    if (id === 'bpm') { progression.streak = 0; history = []; }
+    if (id === 'bpm') { progression.streak = 0; completedQualifyingScores = null; history = []; }
     else resetProgress();
     rebuild();
     updateProgress();
@@ -1233,11 +1298,12 @@ for (const id of ['focus', 'bars', 'section', 'bpm']) $(id).addEventListener('ch
 for (const id of ['practice-bar', 'practice-speed']) $(id).addEventListener('change', () => {
   try {
     progression.streak = 0;
+    completedQualifyingScores = null;
     history = [];
     rebuild();
     updateProgress();
-    notify(exercise.nextSpeed != null ? `Speed ladder selected: three consecutive Record loops at 90% or higher advance from ${exercise.practiceSpeed}% to ${exercise.nextSpeed}%.` :
-      exercise.practiceOnly ? 'Practice drill selected. Scores are feedback only; return to the full pattern at normal tempo for level-up.' : 'Full pattern restored. Record three consecutive qualifying loops to advance.');
+    notify(exercise.nextSpeed != null ? `Speed ladder selected: three Record loops at ${QUALIFYING_SCORE}% or higher advance from ${exercise.practiceSpeed}% to ${exercise.nextSpeed}%. They do not need to be consecutive.` :
+      exercise.practiceOnly ? 'Practice drill selected. Scores are feedback only; return to the full pattern at normal tempo for level-up.' : `Full pattern restored. Record three loops at ${QUALIFYING_SCORE}% or higher to advance; they do not need to be consecutive.`);
   } catch (error) { reportError(error); }
 });
 $('demo').addEventListener('click', () => {
@@ -1514,11 +1580,11 @@ window.addEventListener('blur', releaseInputs);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && transport.mode !== 'stop') {
     releaseInputs();
-    transport.stop();
+    stopPractice();
     notify('Playback stopped while the tab was hidden to keep training timing reliable.');
   }
 });
-window.addEventListener('pagehide', () => transport.stop());
+window.addEventListener('pagehide', () => stopPractice());
 let resizeTimer;
 new ResizeObserver(() => {
   clearTimeout(resizeTimer);
@@ -1697,9 +1763,11 @@ function renderMasteryDialog() {
   }));
 }
 
-setStyle(style);
+setStyle(style, { remember: false });
 libraryReady = loadLibrary();
 void libraryReady.then(restoreFolderOnVisit);
+void restoreLastPracticeStyle();
+void controller.autoReconnect().catch(reportError);
 updateDevices();
 updateMasteryBadge();
 animate();

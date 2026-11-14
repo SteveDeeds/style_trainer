@@ -1,5 +1,5 @@
 import * as JSSynth from 'js-synthesizer';
-import { assetUrl } from './assets.js';
+import { assetUrl, ENCOURAGEMENT_SAMPLES } from './assets.js';
 
 export function monitorNote(pitch, velocity, source) {
   const program = Number.isInteger(source?.program) && source.program >= 0 && source.program <= 127 ? source.program : 0;
@@ -12,6 +12,8 @@ export class AudioEngine {
     this.voiceIds = new Map();
     this.noteKeys = new WeakMap();
     this.celebrationVoices = new Set();
+    this.encouragementBuffers = new Map();
+    this.lastEncouragement = new Map();
     this.clickVoices = new Set();
     this.clickSound = 'clave';
     this.soundfont = null;
@@ -76,50 +78,46 @@ export class AudioEngine {
     oscillator.start();
     oscillator.stop(this.context.currentTime + .05);
   }
-  perfectFanfare() {
-    if (!this.context) return;
-    [72, 76, 79, 84, 88].forEach((pitch, index) => {
-      const start = this.context.currentTime + index * 0.08;
-      const oscillator = this.context.createOscillator();
-      const gain = this.context.createGain();
-      oscillator.type = 'triangle';
-      oscillator.frequency.value = 440 * 2 ** ((pitch - 69) / 12);
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(0.22, start + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.55);
-      oscillator.connect(gain);
-      gain.connect(this.gain);
-      this.celebrationVoices.add(oscillator);
-      oscillator.onended = () => {
-        this.celebrationVoices.delete(oscillator);
-        oscillator.disconnect();
-        gain.disconnect();
-      };
-      oscillator.start(start);
-      oscillator.stop(start + 0.58);
-    });
+  async loadEncouragement() {
+    if (!this.context) throw new Error('Audio must be initialized before loading encouragement samples.');
+    if (this.encouragementLoading) return this.encouragementLoading;
+    this.encouragementLoading = Promise.all(Object.values(ENCOURAGEMENT_SAMPLES).flat().map(async file => {
+      if (this.encouragementBuffers.has(file)) return;
+      const response = await fetch(assetUrl(`samples/${encodeURIComponent(file)}`));
+      if (!response.ok) throw new Error(`Encouragement sample "${file}" could not be loaded (HTTP ${response.status}).`);
+      const buffer = await this.context.decodeAudioData(await response.arrayBuffer());
+      this.encouragementBuffers.set(file, buffer);
+    }));
+    try {
+      await this.encouragementLoading;
+    } finally {
+      this.encouragementLoading = null;
+    }
   }
-  celebrate() {
-    if (!this.context) throw new Error('Audio must be initialized before playing the congratulations sound.');
-    [60, 64, 67, 72].forEach((pitch, index) => {
-      const start = this.context.currentTime + index * .14;
-      const oscillator = this.context.createOscillator();
-      const gain = this.context.createGain();
-      oscillator.frequency.value = 440 * 2 ** ((pitch - 69) / 12);
-      gain.gain.setValueAtTime(.0001, start);
-      gain.gain.exponentialRampToValueAtTime(.2, start + .01);
-      gain.gain.exponentialRampToValueAtTime(.0001, start + .4);
-      oscillator.connect(gain);
-      gain.connect(this.gain);
-      this.celebrationVoices.add(oscillator);
-      oscillator.onended = () => {
-        this.celebrationVoices.delete(oscillator);
-        oscillator.disconnect();
-        gain.disconnect();
-      };
-      oscillator.start(start);
-      oscillator.stop(start + .42);
-    });
+  encourage(kind) {
+    const files = ENCOURAGEMENT_SAMPLES[kind];
+    if (!Object.hasOwn(ENCOURAGEMENT_SAMPLES, kind)) throw new Error('Choose an up, down, qualifying or advance encouragement cue.');
+    if (!this.context || files.some(file => !this.encouragementBuffers.has(file))) {
+      throw new Error('Load encouragement samples before playing a cue.');
+    }
+    const choices = files.filter(file => file !== this.lastEncouragement.get(kind));
+    const file = choices[Math.floor(Math.random() * choices.length)];
+    for (const voice of this.celebrationVoices) voice.stop();
+    this.celebrationVoices.clear();
+    const source = this.context.createBufferSource();
+    source.buffer = this.encouragementBuffers.get(file);
+    source.connect(this.gain);
+    this.celebrationVoices.add(source);
+    source.onended = () => {
+      this.celebrationVoices.delete(source);
+      source.disconnect();
+    };
+    source.start();
+    this.lastEncouragement.set(kind, file);
+  }
+  tempoChange(direction) {
+    if (direction !== 'up' && direction !== 'down') throw new Error('Choose an up or down tempo cue.');
+    this.encourage(direction);
   }
   on(note, voiceId = null) {
     if (!this.context || (this.soundfont === null && !this.preview)) return;
@@ -195,12 +193,14 @@ export class AudioEngine {
     }
     voice.note = { ...voice.note, pitch };
   }
-  silence() {
+  silence({ feedback = true } = {}) {
     for (const oscillator of this.clickVoices) oscillator.stop();
     this.clickVoices.clear();
     this.voiceIds.clear();
-    for (const oscillator of this.celebrationVoices) oscillator.stop();
-    this.celebrationVoices.clear();
+    if (feedback) {
+      for (const oscillator of this.celebrationVoices) oscillator.stop();
+      this.celebrationVoices.clear();
+    }
     for (const [key, voice] of this.voices) {
       voice.count = 1;
       this.releaseVoice(key, voice);

@@ -124,11 +124,14 @@ main { max-width: 1360px; margin: auto; padding: 8px 20px 110px; }
 #accuracy small { font-size: 12px; margin-left: 1px; }
 #score-status { color: var(--muted); font-size: 11px; }
 #streak-label { margin-left: auto; font-size: 12px; }
-.streak i { width: 16px; height: 6px; background: #dce5e8; border-radius: 3px; }
+.streak i { width: 12px; height: 12px; background: #dce5e8; border-radius: 50%; }
 .streak i.filled { background: var(--teal); }
-.streak i.filled.pass { background: var(--teal); }
-.streak i.filled.perfect { background: #f59e0b; box-shadow: 0 0 6px #f59e0b88; }
+.streak i.filled.pass { background: #008d42; box-shadow: 0 0 5px #008d4266; }
+.streak.complete i.filled { box-shadow: 0 0 8px #008d4299; }
 .practice-status { padding: 4px 16px 0; color: #006e5e; font-size: 11px; }
+.timing-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 4px 16px 0; font-size: 11px; }
+.timing-perfect { color: #008d42; }
+.timing-close { color: #2479c9; }
 .notation {
   margin: 8px 10px 10px; min-height: 180px; max-height: 520px;
   overflow: auto; scrollbar-gutter: stable; color: #1d2d40;

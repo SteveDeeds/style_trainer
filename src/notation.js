@@ -2,7 +2,12 @@ import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental, Annotation, A
 
 const sharpNames = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
 const flatNames = ['c', 'db', 'd', 'eb', 'e', 'f', 'gb', 'g', 'ab', 'a', 'bb', 'b'];
-const drumKeys = { 33: 'f/4', 35: 'f/4', 36: 'f/4', 31: 'c/5', 37: 'c/5', 38: 'c/5', 40: 'c/5', 42: 'g/5', 44: 'g/5', 46: 'g/5' };
+const drumKeys = { 33: 'f/4', 35: 'f/4', 36: 'f/4', 31: 'c/5', 37: 'c/5', 38: 'c/5', 40: 'c/5', 42: 'g/5/x2', 44: 'd/4/d2', 46: 'g/5/x3' };
+const hiHats = {
+  42: { name: 'Closed hi-hat', symbol: 'X' },
+  44: { name: 'Pedal hi-hat', symbol: 'diamond below staff' },
+  46: { name: 'Open hi-hat', symbol: 'circled X' },
+};
 
 export const writtenPitch = note => note.pitch + (note.part === 'bass' ? 12 : 0);
 
@@ -257,7 +262,12 @@ export class Notation {
         head.style.cursor = 'pointer';
         head.setAttribute('role', 'button');
         head.setAttribute('tabindex', '0');
-        head.setAttribute('aria-label', `Play MIDI note ${source.pitch}`);
+        const label = source.part === 'drums' && hiHats[source.pitch] ?
+          `${hiHats[source.pitch].name}, MIDI note ${source.pitch}` : `MIDI note ${source.pitch}`;
+        head.setAttribute('aria-label', `Play ${label}`);
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        title.textContent = label;
+        head.append(title);
         head.addEventListener('click', () => this.onAudition(source));
         head.addEventListener('keydown', event => {
           if (event.key === 'Enter' || event.key === ' ') {
@@ -276,10 +286,18 @@ export class Notation {
     this.cursor.style.pointerEvents = 'none';
     svg.append(this.cursor);
     this.update(0);
+    if (exercise.target.some(source => source.part === 'drums' && hiHats[source.pitch])) {
+      const legend = document.createElement('p');
+      legend.className = 'metric-sub';
+      legend.textContent = `Hi-hats: ${Object.entries(hiHats).map(([pitch, hat]) =>
+        `${hat.symbol} = ${hat.name.toLowerCase()} (MIDI ${pitch})`).join('; ')}.`;
+      this.element.append(legend);
+    }
   }
   clearFeedback() {
     for (const entry of this.feedbackEntries ?? []) {
       for (const head of entry.note.getSVGElement()?.querySelectorAll('.vf-notehead') ?? []) {
+        head.removeAttribute('data-timing');
         head.style.removeProperty('fill');
         head.style.removeProperty('stroke');
         head.querySelectorAll('path').forEach(path => { path.style.removeProperty('fill'); path.style.removeProperty('stroke'); });
@@ -288,7 +306,7 @@ export class Notation {
     for (const mark of this.feedbackMarks ?? []) mark.remove();
     this.feedbackMarks = [];
   }
-  feedback(pitch, tick, correct) {
+  feedback(pitch, tick, correct, credit = 1) {
     if (!this.positions?.length || !this.exercise) return;
     if (correct) {
       const entries = this.feedbackEntries.filter(entry => entry.sources.some(source =>
@@ -298,9 +316,11 @@ export class Notation {
         const index = entry.pitches.indexOf(writtenPitch(source));
         const head = entry.note.getSVGElement()?.querySelectorAll('.vf-notehead')[index];
         if (head) {
-          head.style.fill = '#008d42';
-          head.style.stroke = '#008d42';
-          head.querySelectorAll('path').forEach(path => { path.style.fill = '#008d42'; path.style.stroke = '#008d42'; });
+          const color = credit === .5 ? '#2479c9' : '#008d42';
+          head.setAttribute('data-timing', credit === .5 ? 'close' : 'perfect');
+          head.style.fill = color;
+          head.style.stroke = color;
+          head.querySelectorAll('path').forEach(path => { path.style.fill = color; path.style.stroke = color; });
         }
       }
       return;

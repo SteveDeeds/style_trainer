@@ -34,6 +34,9 @@ async function storedFolder(mode, operation) {
 export const readStyleFolder = () => storedFolder('readonly', store => store.get('selected'));
 export const saveStyleFolder = handle => storedFolder('readwrite', store => store.put(handle, 'selected'));
 export const forgetStyleFolder = () => storedFolder('readwrite', store => store.delete('selected'));
+export const readLastStyle = () => storedFolder('readonly', store => store.get('last-style'));
+export const saveLastStyle = style => storedFolder('readwrite', store => store.put(style, 'last-style'));
+export const forgetLastStyle = () => storedFolder('readwrite', store => store.delete('last-style'));
 
 export async function folderPermission(handle, request = false) {
   const options = { mode: 'read' };

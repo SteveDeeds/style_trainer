@@ -300,16 +300,15 @@ test('speed ladder excludes single-bar drills, lowered header tempo and manual 2
     assert.equal(exercise.nextSpeed, null);
   }
 });
-test('rolling average progression tracks up to 3 loops; level change resets streak; top level masters', () => {
+test('progression counts qualifying loops separately from the recent average and resets on level changes', () => {
   const full = buildExercise(createDemo(), { trackId: '1:1' });
   const progression = new Progression(4);
   const slow = practiceExercise(full, { bpm: 96, normalBpm: 96, speed: 50 });
   progression.submitExercise(100, slow);
-  progression.submitExercise(89.99, slow);
-  assert.equal(progression.streak, 2);
-  // An average < 90 across 3 loops does not advance
+  progression.submitExercise(79.99, slow);
+  assert.equal(progression.streak, 1);
   progression.submitExercise(70, slow);
-  assert.equal(progression.streak, 3);
+  assert.equal(progression.streak, 1);
   assert.ok(progression.average < 90);
   progression.selectLevel(4);
   assert.equal(progression.streak, 0); // selectLevel resets streak
@@ -379,6 +378,30 @@ function rhythmExercise(notes, meter = { numerator: 4, denominator: 4 }, bars = 
     target: notes.map(([tick, duration, pitch = 36]) => ({ tick, duration, pitch, part: 'bass' })),
   };
 }
+test('hi-hat articulations have distinct heads and preserve controller pitches', () => {
+  const exercise = rhythmExercise([[0, 480, 42], [480, 480, 44], [960, 480, 46], [1440, 480, 38]]);
+  exercise.target.forEach(note => { note.part = 'drums'; });
+  const before = structuredClone(exercise);
+  const definition = notationStaves(exercise.target)[0];
+  const { entries } = buildNotationVoice(exercise, definition, 0, 'C');
+  assert.deepEqual(entries.map(entry => entry.note.getKeys()), [
+    ['g/5/x2'], ['d/4/d2'], ['g/5/x3'], ['c/5'],
+  ]);
+  assert.deepEqual(entries.slice(0, 3).map(entry => entry.note.getKeyProps()[0].code), [
+    'noteheadXBlack', 'noteheadDiamondBlack', 'noteheadCircleX',
+  ]);
+  assert.deepEqual(entries.map(entry => entry.pitches), [[42], [44], [46], [38]]);
+  assert.deepEqual(exercise, before);
+});
+test('simultaneous hi-hats retain separate heads and source mappings', () => {
+  const exercise = rhythmExercise([[0, 480, 42], [0, 480, 44], [0, 480, 46]]);
+  exercise.target.forEach(note => { note.part = 'drums'; });
+  const definition = notationStaves(exercise.target)[0];
+  const { entries } = prepareNotationBars(exercise, [definition], 'C')[0].parts[0];
+  assert.deepEqual(entries[0].note.getKeys(), ['g/5/x2', 'd/4/d2', 'g/5/x3']);
+  assert.deepEqual(entries[0].pitches, [42, 44, 46]);
+  assert.deepEqual(entries[0].sources, exercise.target);
+});
 test('attack-focused simplification renders the three requested long-note replacements exactly', () => {
   for (const [sounding, next, duration, staccato] of [
     [360, 480, 'q', false], [720, 960, 'h', false], [240, 480, 'q', true],
@@ -816,12 +839,16 @@ test('displayed target keeps the current note during the valid late-hit window',
   assert.equal(targetGroupAt(groups, 490, 100), groups[1]);
   assert.equal(targetGroupAt([], 0, 100), null);
 });
-test('rolling average of 3 loops >= 90% levels up; sub-90% average does not level up', () => {
+test('three scores at 80% or higher level up even with lower scores between them', () => {
   const progression = new Progression(2);
-  assert.equal(progression.submit(90), false);
-  assert.equal(progression.submit(85), false);
+  assert.equal(progression.submit(80), false);
+  assert.equal(progression.submit(75), false);
+  assert.equal(progression.streak, 1);
+  assert.equal(progression.submit(95), false);
   assert.equal(progression.streak, 2);
-  assert.equal(progression.submit(95), true);
+  assert.equal(progression.submit(79.99), false);
+  assert.equal(progression.streak, 2);
+  assert.equal(progression.submit(80), true);
   assert.equal(progression.level, 2);
   assert.equal(progression.streak, 0);
   for (let i = 0; i < 10; i++) progression.submit(100);
@@ -1089,7 +1116,8 @@ test('MIDI feedback uses native note messages and clears lit pads when changing 
   const messages = [];
   const output = { state: 'connected', send: message => messages.push(message) };
   const received = [];
-  const controller = new MidiController((...args) => received.push(args), () => {}, error => { throw error; });
+  const controller = new MidiController((...args) => received.push(args), () => {}, error => { throw error; },
+    { storage: { getItem: () => null, setItem: () => {} } });
   controller.output = output;
   controller.guide([36, 60]);
   controller.setOutput('');

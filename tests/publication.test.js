@@ -7,6 +7,7 @@ test('public resources use the project prefix and preserve encoded file names', 
   for (const path of ['/synth/fluid.js', 'synth/fluid.js']) assert.equal(assetUrl(path, '/style_trainer/'), '/style_trainer/synth/fluid.js');
   assert.equal(assetUrl('/styles/Rock%20%26%20Roll.sty', '/style_trainer/'), '/style_trainer/styles/Rock%20%26%20Roll.sty');
   assert.equal(assetUrl('/library.json', '/'), '/library.json');
+  assert.equal(assetUrl('samples/bring%20it%20up.wav', '/style_trainer/'), '/style_trainer/samples/bring%20it%20up.wav');
   assert.throws(() => assetUrl('https://example.com/file.sf2'), /site-relative/);
 });
 
