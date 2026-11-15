@@ -1,7 +1,7 @@
 import './style.css';
 import { createDemo, parseMidi } from './midi.js';
-import { buildExercise, buildStylePreview, initialHarmony, LAYERS, medianTimingOffset, partOf, pitchName, practiceExercise, Progression, QUALIFYING_SCORE, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
-import { AudioEngine, monitorNote } from './audio.js';
+import { buildExercise, buildStylePreview, inferChord, initialHarmony, LAYERS, masteryFanfarePitches, medianTimingOffset, partOf, pitchName, practiceExercise, Progression, QUALIFYING_SCORE, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
+import { AudioEngine, monitorNote, SFX_TYPES } from './audio.js';
 import { MidiController } from './controller.js';
 import { Notation } from './notation.js';
 import { PianoKeyboard, pianoTargets } from './piano.js';
@@ -35,7 +35,7 @@ document.querySelector('#app').innerHTML = `
       <label class="metric"><span class="field-label">LENGTH</span><select id="bars" aria-label="Exercise length in bars">${Array.from({ length: 8 }, (_, i) => `<option value="${i + 1}" ${i === 3 ? 'selected' : ''}>${i + 1} ${i ? 'bars' : 'bar'}</option>`).join('')}</select></label>
     </section>
     <section class="practice-settings" aria-label="Practice drills">
-      <label>Speed <select id="practice-speed" aria-label="Practice speed"><option value="100">100% · normal</option><option value="90">90%</option><option value="75">75%</option><option value="50">50%</option><option value="25">25%</option></select></label>
+      <label>Speed <select id="practice-speed" aria-label="Practice speed"><option value="125">125% · bonus speed</option><option value="100" selected>100% · normal</option><option value="90">90%</option><option value="75">75%</option><option value="50">50%</option><option value="25">25%</option></select></label>
       <label>Range <select id="practice-bar" aria-label="Practice bar"><option value="">Full pattern</option></select></label>
       <label><input id="solo" type="checkbox"> Solo practice track</label>
       <label><input id="click" type="checkbox" checked> Click</label>
@@ -96,6 +96,11 @@ document.querySelector('#app').innerHTML = `
       <p><a href="https://www.schristiancollins.com/generaluser" target="_blank" rel="noopener noreferrer">About GeneralUser GS by S. Christian Collins</a> · <a id="sound-license" target="_blank" rel="noopener noreferrer">SoundFont license</a></p>
     </section>
     <label>Click sound <select id="click-sound" aria-label="Click sound"><option value="clave">Clave</option><option value="side-stick">Side stick</option></select></label>
+    <section class="sfx-settings" aria-label="Sound effects">
+      <h3>Sound effects</h3>
+      <label>SFX type <select id="sfx-type" aria-describedby="sfx-description">${Object.entries(SFX_TYPES).map(([value, name]) => `<option value="${value}">${name}</option>`).join('')}</select></label>
+      <p id="sfx-description">Band leader uses spoken encouragement. Video game uses synthesized tones and arpeggios. None silences these effects, not instruments or the metronome. Saved in this browser.</p>
+    </section>
     <section class="latency-strip" aria-label="Timing calibration">
       <div><b>Timing calibration</b><small id="latency-detail">Detected audio delay appears after sound starts.</small></div>
       <label>Extra delay <input id="latency-adjust" type="number" min="-300" max="800" step="5" value="0" aria-label="Extra audio delay in milliseconds"> ms</label>
@@ -147,9 +152,10 @@ document.querySelector('#app').innerHTML = `
     <p><b>Play</b> loops the target arrangement and lights MIDI notes. <b>Step</b> freezes at each target onset until you play the pitches. Hold melodic shapes together; drum hits can be tapped in sequence. <b>Record</b> gives a one-bar count-in, mutes your target part, and scores each loop.</p>
     <p>Timing accuracy uses musical subdivision tolerances: <b>green</b> notes within <b>±1/32 note</b> receive full credit; <b>blue</b> notes within <b>±1/16 note</b> receive half credit. Notes worse than ±1/16 note receive no credit and count as extra notes. Wrong pitches count against you. Score <b>${QUALIFYING_SCORE}% or higher on three recorded loops</b> to advance to the next level or increase speed. They do not need to be consecutive; lower scores keep your earned qualifying loops. Each qualifying pattern of four bars or more lights a progress LED and plays "huh" or "yeah". The third lights all three LEDs and plays a longer phrase, "let's go" or "yeah like that", before progress resets at the next speed or density. Perfect scores also count toward stars and crowns in your Trophy Case.</p>
     <p><b>Mastery & Trophies</b> opens a wide showcase with separate Style Mastery and Trophy Case tabs. Expand a style to see section badges and every playable instrument. Master all Bass or Drums tracks for its family indicator; master every playable section/instrument combination for the Style Hero reward. Silent combinations do not count, and returning to a track resumes its saved density. Older aggregate scores remain labeled as legacy history rather than being assigned to an instrument.</p>
-    <p><b>Range</b> lets you drill any individual bar. At full-pattern settings and the original base BPM, <b>Speed</b> advances through 50% → 75% → 100% after three loops each scoring ${QUALIFYING_SCORE}% or higher, not necessarily in a row. Recording continues: "bring it up" or "come on" signals a tempo increase at a loop boundary. An average below 60% over the last three loops slows one step (100% → 75% → 50%) with a "drop" or "lay back" sample, keeping your density level. At 100%, three qualifying loops pass the density level without a tempo-change cue. Changing tempo or density starts a fresh qualifying-loop count. Single-bar drills, 25%/90% speeds and a lowered base BPM remain practice-only. Loop off still finishes one pass and stops.</p>
+    <p><b>Range</b> lets you drill any individual bar. At full-pattern settings and the original base BPM, <b>Speed</b> advances through 50% → 75% → 100% after three loops each scoring ${QUALIFYING_SCORE}% or higher, not necessarily in a row. Recording continues: "pick it up" or "come on" signals a tempo increase at a loop boundary. An average below 60% over the last three loops slows one step (125% → 100% → 75% → 50%) with a "drop" or "lay back" sample, keeping your density level. At 100%, three qualifying loops pass the density level without a tempo-change cue. Mastering level 4 saves its checkmark, plays an in-key trumpet-style fanfare (unless SFX is None), and moves to 125% bonus speed without stopping. You can also select 125% at any level without unlocking it; speed never automatically exceeds 125%. Changing tempo or density starts a fresh qualifying-loop count. Single-bar drills, 25%/90% speeds and a lowered base BPM remain practice-only. Loop off still finishes one pass and stops.</p>
     <p>The score emphasizes <b>note attacks</b>: short release rests can become a longer note, with a staccato dot for clearly short articulation. Meaningful rests remain. Ties are reserved for beat/bar boundaries; no automatic tenuto or legato is inferred. Audio and scoring retain source timing.</p>
     <p><b>Change style</b> opens the local library, import and demo controls. <b>Devices & audio</b> contains MIDI ports, SoundFont loading, Preview synth, click sound and diagnostics. <b>Chord progression</b> offers key selection, randomization and restore. Enable <b>On-screen keys</b> for playable pads; MIDI works with them hidden. Click a level indicator while stopped to inspect any density.</p>
+    <p><b>Sound effects</b> in Devices & audio lets you choose <b>Band leader</b> for spoken samples (the default), <b>Video game</b> for short tones and arpeggios, or <b>None</b> to silence encouragement and tempo-change cues. Instrument audio, the metronome, scoring and LEDs are unchanged. Choose while stopped; the preference is saved in this browser.</p>
     <p>Your last loaded style is saved in this browser and restored while stopped, even if its original file or folder is unavailable. Previewing a style does not replace that saved copy. Selected MIDI input and LED output ports are remembered too, including Off. After the first connection, MIDI reconnects automatically when permission is already granted or the remembered device is plugged back in. Otherwise use <b>Connect MIDI</b>. Automatic restoration never starts playback or loads sounds.</p>
     <p>Files are processed locally. Yamaha CASM source chords, NTR/NTT rules, guitar-tuning voicing, pitch limits and RTR note actions guide randomized-harmony playback; ordinary MIDI uses inferred harmony. Guitar voicing is an approximation, not Yamaha firmware's proprietary generator. NOTE GENERATOR RTR requires style-specific data not carried by the imported MIDI and is reported as unsupported. Pitch-shift RTR uses one synth channel per sustained voice and reports exhaustion. Tempo is fixed to the selected BPM. Notation quantizes to sixteenths; scoring uses original timing.</p>
     <p>Use Chrome or Edge on localhost/HTTPS for MIDI. For Launchpad X LEDs, choose LPX MIDI (second Windows interface) and a compatible Lighting Custom layout. Channel 1 provides steady colour. No SysEx is sent. Generic MIDI keyboards may not support LEDs.</p>
@@ -181,6 +187,8 @@ let soundLoad = null;
 let starterWarning = '';
 let libraryFailure = null;
 let savedStarterAvailable = false;
+let localFontLoading = null;
+let inputAudioPreparation = null;
 let history = [];
 let lastPadKey = '';
 let completedQualifyingScores = null;
@@ -189,6 +197,7 @@ let lastStyleSave = Promise.resolve();
 const pressedKeys = new Map();
 const pointerNotes = new Map();
 const inputNotes = new Map();
+const pendingInputNotes = new Map();
 const litCounts = new Map();
 const shortcuts = 'asdfghjklqwertyui';
 const notify = (message, error = false) => {
@@ -243,7 +252,7 @@ async function prepareAudition(request) {
   await libraryReady;
   if (request !== auditionRequest) return false;
   if (library.edition === 'public' && audio.soundfont === null && !audio.preview && !savedStarterAvailable) {
-    showSoundSetup(null);
+    showSoundSetup(pendingMode);
     notify('Choose sounds first, then select the style or click the note again to preview it.');
     return false;
   }
@@ -310,7 +319,7 @@ const transport = new Transport({
       controller.light(pitch, true);
     }
   },
-  silence: options => { audio.silence(options); inputNotes.clear(); litCounts.clear(); controller.clear(); },
+  silence: options => { audio.silence(options); inputNotes.clear(); pendingInputNotes.clear(); litCounts.clear(); controller.clear(); },
   guide: pitches => controller.guide(pitches),
   onState: () => updateTransport(),
   onResult: (result, loop, scoredExercise, inputs) => {
@@ -345,9 +354,14 @@ const transport = new Transport({
     const previousQualifyingScores = [...progression.qualifyingScores];
     const advancement = canSubmit ?
       progression.submitExercise(result.score, scoredExercise) : null;
+    const isMastered = advancement && !advancement.slowedDown && qualifiesForDetailedMastery({
+      completedLevel: scoredExercise.level, maxLevel, nextLevel: progression.level, nextSpeed: advancement.nextSpeed,
+    });
+    let fanfareNotice = '';
     if (advancement && !advancement.slowedDown) {
       completedQualifyingScores = [...previousQualifyingScores, result.score];
-      if (scoredExercise.bars >= 4) audio.encourage('advance');
+      if (isMastered) fanfareNotice = playMasteryFanfare(scoredExercise);
+      else if (scoredExercise.bars >= 4) audio.encourage('advance');
     } else if (canSubmit && result.score >= QUALIFYING_SCORE && scoredExercise.bars >= 4 &&
       (scoredExercise.nextSpeed != null || !scoredExercise.practiceOnly)) {
       audio.encourage('qualifying');
@@ -358,12 +372,6 @@ const transport = new Transport({
       notify(`Let's ease the tempo: three-loop average below 60%. Speed drops to ${advancement.nextSpeed}% at the next loop; density stays at level ${progression.level}.`);
     } else if (advancement) {
       const leveledUp = progression.level > scoredExercise.level;
-      const isMastered = qualifiesForDetailedMastery({
-        completedLevel: scoredExercise.level,
-        maxLevel,
-        nextLevel: progression.level,
-        nextSpeed: advancement.nextSpeed,
-      });
       if (advancement.nextSpeed) $('practice-speed').value = String(advancement.nextSpeed);
       if (advancement.nextSpeed || leveledUp) {
         queuePracticeChange(makeExercise());
@@ -385,8 +393,10 @@ const transport = new Transport({
       mastery = advRes.mastery;
       persistMastery();
       unlockedTrophies.push(...advRes.unlocked);
+      if (isMastered) updateDensity();
 
-      notify(advancement.nextSpeed ? `Congratulations! Three loops scored ${QUALIFYING_SCORE}% or higher at ${scoredExercise.practiceSpeed}%. Speed increases to ${advancement.nextSpeed}% at the next loop, at level ${progression.level}. Keep playing!` :
+      notify(isMastered ? `Level ${maxLevel} mastered ✓! ${advancement.nextSpeed === 125 ? '125% bonus speed starts at the next loop.' : 'Keep playing at your selected speed.'}${fanfareNotice}` :
+        advancement.nextSpeed ? `Congratulations! Three loops scored ${QUALIFYING_SCORE}% or higher at ${scoredExercise.practiceSpeed}%. Speed increases to ${advancement.nextSpeed}% at the next loop, at level ${progression.level}. Keep playing!` :
         leveledUp ? `Congratulations! Three loops scored ${QUALIFYING_SCORE}% or higher. Level ${progression.level} unlocked for the next loop. Keep playing!` :
         `Congratulations! Three loops scored ${QUALIFYING_SCORE}% or higher on the top level. Pattern mastered! Keep playing.`);
     }
@@ -394,7 +404,7 @@ const transport = new Transport({
     if (unlockedTrophies.length > 0) {
       const uniqueUnlocked = [...new Map(unlockedTrophies.map(t => [t.id, t])).values()];
       const names = uniqueUnlocked.map(t => `${t.icon} ${t.title}`).join(', ');
-      notify(`🏆 Trophy unlocked: ${names}!`);
+      notify(`${isMastered ? `${$('notice').textContent} ` : ''}🏆 Trophy unlocked: ${names}!`);
     }
 
     updateMasteryBadge();
@@ -420,7 +430,8 @@ const transport = new Transport({
 
 function showPracticeChange(nextExercise, cue = true) {
   if (transport.loop) completedQualifyingScores = null;
-  if (cue && nextExercise.playbackBpm !== exercise.playbackBpm) {
+  const masteryBonus = exercise.level === exercise.maxLevel && exercise.practiceSpeed === 100 && nextExercise.practiceSpeed === 125;
+  if (cue && !masteryBonus && nextExercise.playbackBpm !== exercise.playbackBpm) {
     audio.tempoChange(nextExercise.playbackBpm < exercise.playbackBpm ? 'down' : 'up');
   }
   exercise = nextExercise;
@@ -451,6 +462,18 @@ function makeExercise() {
 function notationKey() {
   return randomizedHarmony ? $('harmony-key').value : style.key;
 }
+function playMasteryFanfare(scoredExercise) {
+  let key = notationKey();
+  if (key === 'Unknown') {
+    const policy = sourcePolicy();
+    const chord = inferChord([...scoredExercise.target, ...scoredExercise.backing].filter(note => note.part !== 'drums'));
+    if (policy) key = sourceHarmony(policy).key;
+    else if (chord) key = pitchName(60 + chord.root).replace(/\d+$/, '') + (chord.minor ? 'm' : '');
+  }
+  const unknown = key === 'Unknown';
+  audio.masteryFanfare(masteryFanfarePitches(unknown ? 'C' : key));
+  return unknown && audio.sfxType !== 'none' ? ' Key unavailable; fanfare played in C.' : '';
+}
 function sourcePolicy() {
   return style.sections[Number($('section').value)]?.channelPolicies?.[$('focus').value.split(':')[1]];
 }
@@ -466,7 +489,7 @@ function updateExerciseDescription() {
     const rules = [...new Set(policy.ranges.map(range => `${['Root Trans', 'Root Fixed', 'Guitar'][range.ntr] ?? `NTR ${range.ntr}`} / ${range.ntt}`))];
     $('target-description').textContent += ` · Source ${sourceHarmony(policy).name} · ${rules.join(', ')}`;
   }
-  $('practice-status').textContent = `${Math.round(exercise.playbackBpm * 10) / 10} BPM · ${exercise.nextSpeed != null ? `${exercise.practiceSpeed}% · eligible for speed-up to ${exercise.nextSpeed}%` : exercise.practiceOnly ? 'Practice only — no level-up credit' : 'Full pattern · eligible for level-up'}`;
+  $('practice-status').textContent = `${Math.round(exercise.playbackBpm * 10) / 10} BPM · ${exercise.practiceSpeed === 125 ? '125% bonus speed · ' : ''}${exercise.nextSpeed != null ? `${exercise.practiceSpeed}% · eligible for speed-up to ${exercise.nextSpeed}%` : exercise.practiceOnly ? 'Practice only — no level-up credit' : 'Full pattern · eligible for level-up'}`;
   $('open-harmony').textContent = randomizedHarmony ? `Chord progression: ${$('harmony-key').value} · Randomized` : 'Chord progression: Original';
   $('harmony-summary').textContent = exercise.chords.filter(Boolean).join(' → ') || 'No source chord available';
 }
@@ -601,14 +624,16 @@ function persistMastery() {
 }
 function updateDensity() {
   const layers = trackLayers();
+  const mastered = leafProgress(mastery, selectedMasteryContext()).mastered;
   $('level-badge').textContent = `LEVEL ${progression.level} / ${layers.length}`;
   $('density-name').textContent = layers[progression.level - 1];
   $('layers').replaceChildren(...layers.map((layer, i) => {
     const element = document.createElement('button');
     element.type = 'button';
     element.className = `layer ${i + 1 <= progression.level ? 'unlocked' : ''} ${i + 1 === progression.level ? 'current' : ''}`;
-    element.title = `Debug: select level ${i + 1} — ${layer}`;
-    element.setAttribute('aria-label', `Select level ${i + 1}: ${layer}`);
+    const completed = i + 1 < progression.level || (mastered && i + 1 === layers.length);
+    element.title = `Debug: select level ${i + 1} — ${layer}${completed ? ' · mastered' : ''}`;
+    element.setAttribute('aria-label', `Select level ${i + 1}: ${layer}${completed ? ' (mastered)' : ''}`);
     element.setAttribute('aria-pressed', String(i + 1 === progression.level));
     element.disabled = busy || transport.mode !== 'stop';
     element.addEventListener('click', () => {
@@ -621,7 +646,7 @@ function updateDensity() {
         notify(`Debug: level ${i + 1} selected. Scores and qualifying-loop count reset.`);
       } catch (error) { reportError(error); }
     });
-    element.innerHTML = `<span>${i + 1 < progression.level ? '✓' : String(i + 1).padStart(2, '0')}</span>`;
+    element.innerHTML = `<span>${completed ? '✓' : String(i + 1).padStart(2, '0')}</span>`;
     const label = document.createElement('b');
     label.textContent = `Level ${i + 1}`;
     element.append(label);
@@ -699,7 +724,7 @@ function updateTransport() {
   $('solo').disabled = busy || mode !== 'stop';
   $('restore-chords').disabled = busy || mode !== 'stop' || randomizedHarmony === null;
   $('transport-caption').textContent = { stop: 'Start with a little listening.', play: 'Get to know the groove.', step: 'Take it one shape at a time.', record: 'You have the lead now.' }[mode];
-  for (const id of ['focus', 'bars', 'section', 'bpm', 'style-file', 'demo', 'sf-file', 'preview', 'practice-bar', 'practice-speed', 'library-style', 'load-local-font', 'click', 'click-sound', 'harmony-key', 'randomize-chords', 'open-style-folder', 'restore-style-folder', 'forget-style-folder', 'style-folder-files']) $(id).disabled = busy || mode !== 'stop';
+  for (const id of ['focus', 'bars', 'section', 'bpm', 'style-file', 'demo', 'sf-file', 'preview', 'practice-bar', 'practice-speed', 'library-style', 'load-local-font', 'click', 'click-sound', 'sfx-type', 'harmony-key', 'randomize-chords', 'open-style-folder', 'restore-style-folder', 'forget-style-folder', 'style-folder-files']) $(id).disabled = busy || mode !== 'stop';
   $('load-style').disabled = busy || mode !== 'stop' || !$('library-style').value;
   $('test-led').disabled = busy || mode !== 'stop';
   $('connect-midi').disabled = busy;
@@ -774,28 +799,71 @@ function updatePads() {
     return button;
   }));
 }
-async function playInput(pitch, on) {
+function playInput(pitch, on) {
   try {
-    const ready = audio.resume();
     handleInput(pitch, on);
-    await ready;
-    if (audio.soundfont === null && !audio.preview) notify('Press Play to load your SoundFont, or choose Preview synth to hear the on-screen pads.');
   }
   catch (error) { reportError(error); }
 }
+function prepareInputAudio() {
+  if (inputAudioPreparation) return inputAudioPreparation;
+  inputAudioPreparation = (async () => {
+    let ownsBusy = false;
+    try {
+      const resumed = audio.resume();
+      if (audio.context.state === 'suspended') {
+        notify('Click or tap the page once to enable audio for your MIDI controller.');
+      }
+      await resumed;
+      await libraryReady;
+      if (libraryFailure && audio.soundfont === null && !$('preview').checked) throw libraryFailure;
+      if (library.edition === 'public' && audio.soundfont === null && !$('preview').checked && !savedStarterAvailable) {
+        showSoundSetup(null);
+        return;
+      }
+      if (!busy && audio.soundfont === null && !$('preview').checked) {
+        ownsBusy = true;
+        busy = true;
+        updateTransport();
+      }
+      await ensureAudio();
+      for (const [pitch, note] of pendingInputNotes) {
+        inputNotes.set(pitch, note);
+        audio.on(note);
+      }
+      pendingInputNotes.clear();
+      if (transport.mode === 'stop') notify(`Sounds ready. Play your MIDI controller.${starterWarning ? ` ${starterWarning}` : ''}`, Boolean(starterWarning));
+    } catch (error) {
+      if (error.name === 'AbortError') notify('Sound loading cancelled.');
+      else reportError(error);
+    } finally {
+      if (ownsBusy) {
+        busy = false;
+        updateTransport();
+      }
+    }
+  })().finally(() => { inputAudioPreparation = null; });
+  return inputAudioPreparation;
+}
+function unlockPendingInputAudio() {
+  if (inputAudioPreparation && audio.context?.state === 'suspended') {
+    void audio.resume().catch(reportError);
+  }
+}
+document.addEventListener('pointerdown', unlockPendingInputAudio, true);
+document.addEventListener('keydown', unlockPendingInputAudio, true);
 function handleInput(pitch, on, velocity = 90, timestamp = performance.now()) {
   if (pitch === null) {
     for (const note of inputNotes.values()) audio.off(note);
     inputNotes.clear();
+    pendingInputNotes.clear();
     transport.held.clear();
     $('received-note').textContent = 'Input port changed. Waiting for a note…';
     $('input-feedback').textContent = 'Match the exact MIDI note numbers shown on the target pads.';
     updatePiano();
     return;
   }
-  if (on && !audio.context) {
-    void audio.resume().catch(reportError);
-  } else if (on && audio.context.state === 'suspended') {
+  if (on && (!audio.context || audio.context.state === 'suspended') && (audio.soundfont !== null || audio.preview)) {
     void audio.resume().catch(reportError);
   }
   const group = currentGroup();
@@ -833,12 +901,15 @@ function handleInput(pitch, on, velocity = 90, timestamp = performance.now()) {
       inputNotes.set(pitch, note);
       audio.on(note);
     } else {
-      $('input-feedback').textContent += ' · No sounds loaded: open Devices & audio to load sounds or choose Preview synth.';
+      pendingInputNotes.set(pitch, note);
+      $('input-feedback').textContent += ' · Preparing sounds…';
+      void prepareInputAudio();
     }
   } else if (!on) {
     const note = inputNotes.get(pitch);
     if (note) audio.off(note);
     inputNotes.delete(pitch);
+    pendingInputNotes.delete(pitch);
   }
   for (const pad of $('practice-pads').children) {
     if (Number(pad.dataset.pitch) === pitch) {
@@ -858,6 +929,13 @@ async function ensureAudio() {
   }
 }
 async function loadLocalFont() {
+  if (localFontLoading) return localFontLoading;
+  const loading = performLocalFontLoad();
+  localFontLoading = loading;
+  try { return await loading; }
+  finally { if (localFontLoading === loading) localFontLoading = null; }
+}
+async function performLocalFontLoad() {
   await libraryReady;
   if (libraryFailure) throw libraryFailure;
   if (library.edition === 'public') return await loadStarterFont();
@@ -956,6 +1034,8 @@ function resumePendingMode() {
   if (mode) {
     if ($('devices-dialog').open) $('devices-dialog').close();
     void start(mode);
+  } else if (pendingInputNotes.size) {
+    void prepareInputAudio();
   }
 }
 
@@ -1207,6 +1287,27 @@ $('click').addEventListener('change', () => {
   notify(transport.clickEnabled ? 'Steady click enabled in all modes; Step pauses it while waiting.' : 'Steady click off. Record still has its one-bar count-in.');
 });
 $('click-sound').addEventListener('change', () => { audio.clickSound = $('click-sound').value; });
+const SFX_KEY = 'style-trainer-sfx-type';
+try {
+  const saved = localStorage.getItem(SFX_KEY);
+  if (saved !== null) {
+    audio.setSfxType(saved);
+    $('sfx-type').value = saved;
+  }
+} catch (error) {
+  reportError(new Error(`Could not restore the sound-effects preference: ${error.message}`));
+}
+$('sfx-type').addEventListener('change', () => {
+  try {
+    audio.setSfxType($('sfx-type').value);
+  } catch (error) { reportError(error); return; }
+  try {
+    localStorage.setItem(SFX_KEY, audio.sfxType);
+    notify(`Sound effects: ${SFX_TYPES[audio.sfxType]}. Preference saved.`);
+  } catch (error) {
+    reportError(new Error(`Sound effects changed for this session, but could not be remembered: ${error.message}`));
+  }
+});
 const LATENCY_KEY = 'style-trainer-latency-adjust-ms';
 function readLatencyAdjust() {
   try {

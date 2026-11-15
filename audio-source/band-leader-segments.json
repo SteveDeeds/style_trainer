@@ -1,0 +1,257 @@
+{
+  "sampleRate": 44100,
+  "leadMilliseconds": 25,
+  "tailMilliseconds": 150,
+  "source": {
+    "file": "1_Master_of_the_Room_(Vocals).mp3",
+    "sha256": "23c2dfcb93e4fd3c6952f6e503eca16f22e163e22979a84c821de0c29db6610f"
+  },
+  "model": "dereverb_mel_band_roformer_less_aggressive_anvuew_sdr_18.8050.ckpt",
+  "modelOutput": {
+    "file": "full-vocals_(noreverb)_dereverb_mel_band_roformer_less_aggressive_anvuew_sdr_18.wav",
+    "sha256": "08bae6901b3f6ee794e2e07700f8ea8637f33b2bced2d1f64c4cb4236e35b603",
+    "frames": 5458176
+  },
+  "clips": {
+    "lets go2.wav": {
+      "startFrame": 374193,
+      "endFrame": 406146,
+      "referenceStartFrame": 375296,
+      "referenceFrames": 24235,
+      "referenceSha256": "5bee914d29f5c0133d187c30176986364aa4523c4346992ac4afbfc79331abb1",
+      "correlation": 1.0
+    },
+    "lock it in.wav": {
+      "startFrame": 542453,
+      "endFrame": 579483,
+      "referenceStartFrame": 543556,
+      "referenceFrames": 29312,
+      "referenceSha256": "ac055e4bcd4b7ce373f3783044904279a3536532efd3ce6c84352bd64e304919",
+      "correlation": 1.0
+    },
+    "yeah2.wav": {
+      "startFrame": 667320,
+      "endFrame": 689810,
+      "referenceStartFrame": 668423,
+      "referenceFrames": 14772,
+      "referenceSha256": "1a797c133df23722aa78577fdc8f2f164bfc180121786e7c6c7a73f5f0f95221",
+      "correlation": 1.0
+    },
+    "groovy.wav": {
+      "startFrame": 772339,
+      "endFrame": 825064,
+      "referenceStartFrame": 773442,
+      "referenceFrames": 45007,
+      "referenceSha256": "56eca6b61a9d237672f4bfcf7f20f58d3eff51d5d44f38a9200fe2a58ea92b67",
+      "correlation": 1.0
+    },
+    "feel the pocket.wav": {
+      "startFrame": 957217,
+      "endFrame": 1009019,
+      "referenceStartFrame": 958320,
+      "referenceFrames": 44084,
+      "referenceSha256": "6e83636289fe5c3e442678b3b26560c3febbbf070710319ea2d0238e45ad42ab",
+      "correlation": 1.0
+    },
+    "smooth.wav": {
+      "startFrame": 1142787,
+      "endFrame": 1180741,
+      "referenceStartFrame": 1143890,
+      "referenceFrames": 30236,
+      "referenceSha256": "1430c1fe1046b1a235612826934ced97a3e5a7e1ce7f3154629bd92d6a75da14",
+      "correlation": 1.0
+    },
+    "ah2.wav": {
+      "startFrame": 1316356,
+      "endFrame": 1363542,
+      "referenceStartFrame": 1317459,
+      "referenceFrames": 39468,
+      "referenceSha256": "2370b8bc1b62bfd7092aa0ba5c158a452a3e0ecf4432fc91bd3169184dc13fac",
+      "correlation": 1.0
+    },
+    "lay back2.wav": {
+      "startFrame": 1526392,
+      "endFrame": 1572425,
+      "referenceStartFrame": 1527495,
+      "referenceFrames": 38315,
+      "referenceSha256": "af25d5286eb44708740d4d52fc4818b54f9342d1f27bf874e5df38250d5fd743",
+      "correlation": 1.0
+    },
+    "pick it up.wav": {
+      "startFrame": 1679188,
+      "endFrame": 1717142,
+      "referenceStartFrame": 1680291,
+      "referenceFrames": 30236,
+      "referenceSha256": "697a57542105243593a26959f31644647f2909b48da98a146e9f5bade6861107",
+      "correlation": 1.0
+    },
+    "huh2.wav": {
+      "startFrame": 1895687,
+      "endFrame": 1922793,
+      "referenceStartFrame": 1896790,
+      "referenceFrames": 19388,
+      "referenceSha256": "0a32edc0c41ec2d735002c06f58e1ff049de23eb93fe22c3dc27fc97be076b3c",
+      "correlation": 1.0
+    },
+    "yeah like that2.wav": {
+      "startFrame": 2049175,
+      "endFrame": 2110902,
+      "referenceStartFrame": 2050278,
+      "referenceFrames": 54009,
+      "referenceSha256": "f9462f86abebc53fbf4b9358d97bdaeb839134c0a9ee19080286f47ef98aba41",
+      "correlation": 1.0
+    },
+    "drop it down2.wav": {
+      "startFrame": 2434396,
+      "endFrame": 2475119,
+      "referenceStartFrame": 2435499,
+      "referenceFrames": 33005,
+      "referenceSha256": "057744a2bc8a52ea00fc03b454ef3d5c2bac1938dfa9b39a3a7b9c851eea82d0",
+      "correlation": 1.0
+    },
+    "right there.wav": {
+      "startFrame": 2622044,
+      "endFrame": 2661613,
+      "referenceStartFrame": 2623147,
+      "referenceFrames": 31851,
+      "referenceSha256": "def4edcc863771a06a8162679f6d8b6b7d2e746b96495abcf476460ca606213f",
+      "correlation": 1.0
+    },
+    "drop it back2.wav": {
+      "startFrame": 2825617,
+      "endFrame": 2867033,
+      "referenceStartFrame": 2826720,
+      "referenceFrames": 33698,
+      "referenceSha256": "910fb6002a2b5e0c96a9f24266cf8df748a62f03c75a997ec09133df4b908829",
+      "correlation": 1.0
+    },
+    "snap.wav": {
+      "startFrame": 3024575,
+      "endFrame": 3059759,
+      "referenceStartFrame": 3025678,
+      "referenceFrames": 27466,
+      "referenceSha256": "529f481e989aa5c27f8971826327632a89a482d920e69a8fc0eeba05bd14cc98",
+      "correlation": 1.0
+    },
+    "yeah3.wav": {
+      "startFrame": 3395485,
+      "endFrame": 3423745,
+      "referenceStartFrame": 3396588,
+      "referenceFrames": 20542,
+      "referenceSha256": "df0d61a5382513b683c9a73e48e56acbae40a68365aaeba109f9d7b05d6621fd",
+      "correlation": 1.0
+    },
+    "come on2.wav": {
+      "startFrame": 3532586,
+      "endFrame": 3567770,
+      "referenceStartFrame": 3533689,
+      "referenceFrames": 27466,
+      "referenceSha256": "a7b90c2a69927bc9ca6b833d023c30bbd8bfa9b701d60a6fbd60fac4a1336a20",
+      "correlation": 1.0
+    },
+    "pick it up2.wav": {
+      "startFrame": 3761318,
+      "endFrame": 3828123,
+      "referenceStartFrame": 3762421,
+      "referenceFrames": 59087,
+      "referenceSha256": "30f2a03bc7f00167f355feb610e43a907115af2f4b03ee507eccb63fefb448b3",
+      "correlation": 1.0
+    },
+    "feel the pocket2.wav": {
+      "startFrame": 3973201,
+      "endFrame": 4025926,
+      "referenceStartFrame": 3974304,
+      "referenceFrames": 45007,
+      "referenceSha256": "e869e7b2a20cb86cbf06617051b24a339a617a95c5ba96acbe04511b76a8fb9b",
+      "correlation": 1.0
+    },
+    "groovy2.wav": {
+      "startFrame": 4160849,
+      "endFrame": 4211959,
+      "referenceStartFrame": 4161952,
+      "referenceFrames": 43392,
+      "referenceSha256": "16decda04b7c994d8fbf05cb51dbded0bf89b93b7a0861082d064107df15b549",
+      "correlation": 1.0
+    },
+    "huh3.wav": {
+      "startFrame": 4247171,
+      "endFrame": 4276354,
+      "referenceStartFrame": 4248274,
+      "referenceFrames": 21465,
+      "referenceSha256": "e54951fa479bde0567c2952e90debb9a9ec0038763fbb903764f56f6046dfbb0",
+      "correlation": 1.0
+    },
+    "ah3.wav": {
+      "startFrame": 4332109,
+      "endFrame": 4384373,
+      "referenceStartFrame": 4333212,
+      "referenceFrames": 44546,
+      "referenceSha256": "a27168e66c20da34c31318b5960fc63274759e3d542afd64f21f4860eee6a677",
+      "correlation": 1.0
+    },
+    "oh.wav": {
+      "startFrame": 4426048,
+      "endFrame": 4461463,
+      "referenceStartFrame": 4427151,
+      "referenceFrames": 27697,
+      "referenceSha256": "e416d55efc27711a11e401399cb664df4a75e06630e96e629d4ff8695d4665a3",
+      "correlation": 1.0
+    },
+    "lay back3.wav": {
+      "startFrame": 4534759,
+      "endFrame": 4585408,
+      "referenceStartFrame": 4535862,
+      "referenceFrames": 42931,
+      "referenceSha256": "e1b58877e283638998a5a674270ab92348d6881d91c06c789102ea073ec6a28d",
+      "correlation": 1.0
+    },
+    "lock it in2.wav": {
+      "startFrame": 4693787,
+      "endFrame": 4740050,
+      "referenceStartFrame": 4694890,
+      "referenceFrames": 38545,
+      "referenceSha256": "a601ef7ef5055f575400c84db3cc6701b016dcde281c4ee07a7fe65394c0ef5e",
+      "correlation": 1.0
+    },
+    "smooth2.wav": {
+      "startFrame": 4808499,
+      "endFrame": 4845530,
+      "referenceStartFrame": 4809602,
+      "referenceFrames": 29313,
+      "referenceSha256": "cb2916a75abf9e870d6168a27a83571f1622fa4bb1552b634df79c0493a6b8ef",
+      "correlation": 1.0
+    },
+    "right there2.wav": {
+      "startFrame": 5084778,
+      "endFrame": 5155507,
+      "referenceStartFrame": 5085881,
+      "referenceFrames": 63011,
+      "referenceSha256": "fb33cd268c51d318df5ca2f264ba98d6026f3b66a0c4028b64a9ce4f3e18b1e1",
+      "correlation": 1.0
+    },
+    "drop it down3.wav": {
+      "startFrame": 5168100,
+      "endFrame": 5209285,
+      "referenceStartFrame": 5169203,
+      "referenceFrames": 33467,
+      "referenceSha256": "f06482d071a26f71c8ea4cac3bee5123229bfcae298844d1e370935cc6413d2b",
+      "correlation": 1.0
+    },
+    "drop it back3.wav": {
+      "startFrame": 5215416,
+      "endFrame": 5259140,
+      "referenceStartFrame": 5216519,
+      "referenceFrames": 36006,
+      "referenceSha256": "81e6426a443ef0af682cdd76400e33e4f7bd35adca9a359f89624831a01f3724",
+      "correlation": 1.0
+    },
+    "huh4.wav": {
+      "startFrame": 5285813,
+      "endFrame": 5318920,
+      "referenceStartFrame": 5286916,
+      "referenceFrames": 25389,
+      "referenceSha256": "0ef5481d1e7237f69f5014c4ba4d50e0d0c797e62929c16353a10da9549cebcb",
+      "correlation": 1.0
+    }
+  }
+}

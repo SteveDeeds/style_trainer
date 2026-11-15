@@ -144,13 +144,23 @@ function harmonyChanges(notes) {
   return changes;
 }
 
-export function randomHarmony(key, bars, random = Math.random) {
+function keySignature(key) {
   const match = /^([A-G])([b#]?)(m?)$/.exec(key);
-  if (!match) throw new Error('Random harmony needs a known major or minor key signature.');
-  if (!Number.isInteger(bars) || bars < 1 || bars > 8) throw new Error('Random harmony needs 1 to 8 bars.');
+  if (!match) throw new Error('Choose a known major or minor key signature.');
   const natural = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
   const tonic = (natural[match[1]] + (match[2] === '#' ? 1 : match[2] === 'b' ? -1 : 0) + 12) % 12;
-  const scale = match[3] ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11];
+  return { tonic, minor: Boolean(match[3]) };
+}
+
+export function masteryFanfarePitches(key) {
+  const { tonic, minor } = keySignature(key);
+  return [0, 0, 0, minor ? 3 : 4, 7, 12, 7, 12].map(interval => 60 + tonic + interval);
+}
+
+export function randomHarmony(key, bars, random = Math.random) {
+  const { tonic, minor } = keySignature(key);
+  if (!Number.isInteger(bars) || bars < 1 || bars > 8) throw new Error('Random harmony needs 1 to 8 bars.');
+  const scale = minor ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11];
   const names = /b|^F$|^Dm$|^Gm$|^Cm$|^Fm$/.test(key) ?
     ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] :
     ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -327,16 +337,17 @@ export function groupNotes(notes) {
 }
 
 export function practiceExercise(exercise, { bar = null, bpm, normalBpm, speed = 100 }) {
-  if (!Number.isFinite(bpm) || bpm < 30 || bpm > 240 || !Number.isFinite(speed) || speed < 25 || speed > 100) {
-    throw new Error('Choose a tempo from 30 to 240 BPM and a practice speed from 25% to 100%.');
+  if (!Number.isFinite(bpm) || bpm < 30 || bpm > 240 || !Number.isFinite(speed) || speed < 25 || speed > 125) {
+    throw new Error('Choose a tempo from 30 to 240 BPM and a practice speed from 25% to 125%.');
   }
   if (bar !== null && (!Number.isInteger(bar) || bar < 0 || bar >= exercise.bars)) {
     throw new Error('Choose a bar within the current pattern.');
   }
   const playbackBpm = bpm * speed / 100;
   const practiceOnly = bar !== null || speed < 100 || bpm < normalBpm;
-  const nextSpeed = bar === null && bpm >= normalBpm ? ({ 50: 75, 75: 100 }[speed] ?? null) : null;
-  const previousSpeed = bar === null && bpm >= normalBpm ? ({ 100: 75, 75: 50 }[speed] ?? null) : null;
+  const nextSpeed = bar === null && bpm >= normalBpm ?
+    ({ 50: 75, 75: 100 }[speed] ?? (speed === 100 && exercise.level === exercise.maxLevel ? 125 : null)) : null;
+  const previousSpeed = bar === null && bpm >= normalBpm ? ({ 125: 100, 100: 75, 75: 50 }[speed] ?? null) : null;
   if (bar === null) return { ...exercise, playbackBpm, practiceOnly, practiceSpeed: speed, nextSpeed, previousSpeed };
   const start = bar * exercise.barTicks;
   const end = start + exercise.barTicks;

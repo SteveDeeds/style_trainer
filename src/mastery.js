@@ -243,7 +243,7 @@ export function leafProgress(state, context) {
 }
 
 export const qualifiesForDetailedMastery = ({ completedLevel, maxLevel, nextLevel, nextSpeed }) =>
-  completedLevel >= maxLevel && nextLevel === maxLevel && nextSpeed == null;
+  completedLevel >= maxLevel && nextLevel === maxLevel && (nextSpeed == null || nextSpeed === 125);
 
 export function recordLoopToMastery(state, {
   styleName,

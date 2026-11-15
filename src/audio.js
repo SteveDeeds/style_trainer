@@ -1,6 +1,8 @@
 import * as JSSynth from 'js-synthesizer';
 import { assetUrl, ENCOURAGEMENT_SAMPLES } from './assets.js';
 
+export const SFX_TYPES = { 'band-leader': 'Band leader', 'video-game': 'Video game', none: 'None' };
+
 export function monitorNote(pitch, velocity, source) {
   const program = Number.isInteger(source?.program) && source.program >= 0 && source.program <= 127 ? source.program : 0;
   return { pitch, velocity, channel: source?.part === 'drums' ? 9 : 15, program, bank: 0 };
@@ -16,6 +18,7 @@ export class AudioEngine {
     this.lastEncouragement = new Map();
     this.clickVoices = new Set();
     this.clickSound = 'clave';
+    this.sfxType = 'band-leader';
     this.soundfont = null;
     this.preview = false;
     this.volume = .65;
@@ -79,6 +82,7 @@ export class AudioEngine {
     oscillator.stop(this.context.currentTime + .05);
   }
   async loadEncouragement() {
+    if (this.sfxType !== 'band-leader') return;
     if (!this.context) throw new Error('Audio must be initialized before loading encouragement samples.');
     if (this.encouragementLoading) return this.encouragementLoading;
     this.encouragementLoading = Promise.all(Object.values(ENCOURAGEMENT_SAMPLES).flat().map(async file => {
@@ -97,13 +101,17 @@ export class AudioEngine {
   encourage(kind) {
     const files = ENCOURAGEMENT_SAMPLES[kind];
     if (!Object.hasOwn(ENCOURAGEMENT_SAMPLES, kind)) throw new Error('Choose an up, down, qualifying or advance encouragement cue.');
+    if (this.sfxType === 'none') return;
+    if (this.sfxType === 'video-game') {
+      this.playGameCue(kind);
+      return;
+    }
     if (!this.context || files.some(file => !this.encouragementBuffers.has(file))) {
       throw new Error('Load encouragement samples before playing a cue.');
     }
     const choices = files.filter(file => file !== this.lastEncouragement.get(kind));
     const file = choices[Math.floor(Math.random() * choices.length)];
-    for (const voice of this.celebrationVoices) voice.stop();
-    this.celebrationVoices.clear();
+    this.stopEncouragement();
     const source = this.context.createBufferSource();
     source.buffer = this.encouragementBuffers.get(file);
     source.connect(this.gain);
@@ -114,6 +122,80 @@ export class AudioEngine {
     };
     source.start();
     this.lastEncouragement.set(kind, file);
+  }
+  setSfxType(type) {
+    if (!Object.hasOwn(SFX_TYPES, type)) throw new Error('Choose Band leader, Video game or None for sound effects.');
+    this.stopEncouragement();
+    this.sfxType = type;
+  }
+  stopEncouragement() {
+    for (const voice of this.celebrationVoices) voice.stop();
+    this.celebrationVoices.clear();
+  }
+  playGameCue(kind) {
+    if (!this.context) throw new Error('Audio must be initialized before playing a sound effect.');
+    this.stopEncouragement();
+    const pitches = {
+      qualifying: [72, 79],
+      advance: [60, 64, 67, 72, 76],
+      up: [60, 64, 67, 72],
+      down: [72, 67, 64, 60],
+    }[kind];
+    const duration = kind === 'advance' ? .3 : .18;
+    pitches.forEach((pitch, index) => {
+      const start = this.context.currentTime + index * .08;
+      const oscillator = this.context.createOscillator();
+      const gain = this.context.createGain();
+      oscillator.type = 'triangle';
+      oscillator.frequency.value = 440 * 2 ** ((pitch - 69) / 12);
+      gain.gain.setValueAtTime(.0001, start);
+      gain.gain.exponentialRampToValueAtTime(.14, start + .01);
+      gain.gain.exponentialRampToValueAtTime(.0001, start + duration);
+      oscillator.connect(gain);
+      gain.connect(this.gain);
+      this.celebrationVoices.add(oscillator);
+      oscillator.onended = () => {
+        this.celebrationVoices.delete(oscillator);
+        oscillator.disconnect();
+        gain.disconnect();
+      };
+      oscillator.start(start);
+      oscillator.stop(start + duration + .02);
+    });
+  }
+  masteryFanfare(pitches) {
+    if (!Array.isArray(pitches) || !pitches.length ||
+      pitches.some(pitch => !Number.isInteger(pitch) || pitch < 0 || pitch > 127)) {
+      throw new Error('Mastery fanfare needs valid MIDI pitches.');
+    }
+    if (this.sfxType === 'none') return;
+    if (!this.context) throw new Error('Audio must be initialized before playing the mastery fanfare.');
+    this.stopEncouragement();
+    // Independent brass synthesis never changes a backing track's MIDI program.
+    const wave = this.context.createPeriodicWave(new Float32Array(9),
+      new Float32Array([0, 1, .7, .55, .4, .3, .2, .12, .06]));
+    pitches.forEach((pitch, index) => {
+      const start = this.context.currentTime + index * .15;
+      const duration = index === pitches.length - 1 ? .65 : .12;
+      const oscillator = this.context.createOscillator();
+      const gain = this.context.createGain();
+      oscillator.setPeriodicWave(wave);
+      oscillator.frequency.value = 440 * 2 ** ((pitch - 69) / 12);
+      gain.gain.setValueAtTime(.0001, start);
+      gain.gain.exponentialRampToValueAtTime(.13, start + .02);
+      gain.gain.exponentialRampToValueAtTime(.08, start + duration * .7);
+      gain.gain.exponentialRampToValueAtTime(.0001, start + duration);
+      oscillator.connect(gain);
+      gain.connect(this.gain);
+      this.celebrationVoices.add(oscillator);
+      oscillator.onended = () => {
+        this.celebrationVoices.delete(oscillator);
+        oscillator.disconnect();
+        gain.disconnect();
+      };
+      oscillator.start(start);
+      oscillator.stop(start + duration + .02);
+    });
   }
   tempoChange(direction) {
     if (direction !== 'up' && direction !== 'down') throw new Error('Choose an up or down tempo cue.');
@@ -198,8 +280,7 @@ export class AudioEngine {
     this.clickVoices.clear();
     this.voiceIds.clear();
     if (feedback) {
-      for (const oscillator of this.celebrationVoices) oscillator.stop();
-      this.celebrationVoices.clear();
+      this.stopEncouragement();
     }
     for (const [key, voice] of this.voices) {
       voice.count = 1;

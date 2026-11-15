@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile, copyFile, mkdir } from 'node:fs/promises';
+import { readdir, readFile, copyFile, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { copySynth } from './copy-synth.js';
@@ -118,7 +118,15 @@ async function stageAssetsAndNotices() {
     path.join(publicRelease, 'licenses', 'LICENSE-Vite.txt'),
   );
   await copySynth(synthDirectory);
-  for (const file of Object.values(ENCOURAGEMENT_SAMPLES).flat()) {
+  const sampleFiles = new Set(Object.values(ENCOURAGEMENT_SAMPLES).flat());
+  const samplesDirectory = path.join(publicRelease, 'samples');
+  await mkdir(samplesDirectory, { recursive: true });
+  for (const entry of await readdir(samplesDirectory, { withFileTypes: true })) {
+    if (entry.isFile() && /\.(?:wav|mp3)$/i.test(entry.name) && !sampleFiles.has(entry.name)) {
+      await rm(path.join(samplesDirectory, entry.name));
+    }
+  }
+  for (const file of sampleFiles) {
     await copy(path.join(root, 'public', 'samples', file), path.join(publicRelease, 'samples', file));
   }
 }
@@ -129,6 +137,11 @@ async function verifyOutput() {
   const relativeFiles = files.map(file => path.relative(dist, file).split(path.sep).join('/'));
   const badStyle = relativeFiles.find(file => file.toLowerCase().endsWith('.sty'));
   if (badStyle) fail(`private style asset was published: ${badStyle}`);
+  const originalSample = relativeFiles.find(file => /^(?:samples\/.*\.wav|audio-source\/)/i.test(file));
+  if (originalSample) fail(`uncompressed source sample was published: ${originalSample}`);
+  const approvedSamples = new Set(Object.values(ENCOURAGEMENT_SAMPLES).flat().map(file => `samples/${file}`));
+  const retiredSample = relativeFiles.find(file => file.startsWith('samples/') && !approvedSamples.has(file));
+  if (retiredSample) fail(`unapproved encouragement sample was published: ${retiredSample}`);
 
   const badSoundFont = relativeFiles.find(file => path.posix.basename(file).toLowerCase() === 'default.sf2');
   if (badSoundFont) fail(`private default SoundFont was published: ${badSoundFont}`);

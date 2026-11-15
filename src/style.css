@@ -164,6 +164,9 @@ main { max-width: 1360px; margin: auto; padding: 8px 20px 110px; }
 .notice.error { color: #a52a25; background: #fff0ed; padding: 10px; border-radius: 5px; }
 .input-monitor { font-size: 12px; color: #365d56; line-height: 1.6; margin-top: 4px; }
 .input-miss { color: #a52a25; }
+.sfx-settings { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.sfx-settings h3 { margin: 0 0 8px; }
+.sfx-settings p { color: var(--muted); font-size: 12px; line-height: 1.6; }
 .results-details { margin-top: 12px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 12px; }
 .results-details summary { font-weight: 600; color: var(--muted); min-height: 28px; }
 .score-history { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }

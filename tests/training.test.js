@@ -318,7 +318,7 @@ test('progression counts qualifying loops separately from the recent average and
   progression.selectLevel(4); // resets streak
   progression.submitExercise(90, top);
   progression.submitExercise(90, top);
-  assert.deepEqual(progression.submitExercise(90, top), { level: 4 });
+  assert.deepEqual(progression.submitExercise(90, top), { nextSpeed: 125 });
   assert.equal(progression.level, 4);
 });
 test('track focus reduces only the selected track and keeps other same-part tracks as backing', () => {

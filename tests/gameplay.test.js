@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AudioEngine } from '../src/audio.js';
 import { assetUrl, ENCOURAGEMENT_SAMPLES } from '../src/assets.js';
-import { readFile } from 'node:fs/promises';
-import { practiceExercise, Progression } from '../src/training.js';
+import { readdir, readFile } from 'node:fs/promises';
+import { masteryFanfarePitches, practiceExercise, Progression } from '../src/training.js';
 import { Transport } from '../src/transport.js';
 
 const pattern = (level = 1) => ({
-  level, ppq: 480, bars: 1, durationTicks: 1920, barTicks: 1920,
+  level, maxLevel: 4, ppq: 480, bars: 1, durationTicks: 1920, barTicks: 1920,
   meter: { numerator: 4, denominator: 4 },
   target: [], backing: [], chords: ['C'],
   groups: [{ tick: 0, pitches: [60], notes: [] }],
@@ -70,6 +70,58 @@ test('manual resets and automatic slowdowns clear qualifying progress for the ch
   assert.deepEqual(progression.submitExercise(0, exercise), { nextSpeed: 75, slowedDown: true });
   assert.equal(progression.streak, 0);
   assert.equal(progression.qualifyingScores.length, 0);
+});
+
+test('mastering the top density at normal speed advances to the 125% bonus without raising density', () => {
+  const progression = new Progression(4);
+  progression.selectLevel(4);
+  const exercise = exerciseAt(100, 4);
+  assert.equal(exercise.nextSpeed, 125);
+  for (const score of [80, 70, 90, 79.99]) assert.equal(progression.submitExercise(score, exercise), null);
+  assert.deepEqual(progression.submitExercise(80, exercise), { nextSpeed: 125 });
+  assert.equal(progression.level, 4);
+  assert.equal(progression.streak, 0);
+  const bonus = exerciseAt(125, 4);
+  assert.equal(bonus.nextSpeed, null);
+  for (let set = 0; set < 2; set++) {
+    assert.equal(progression.submitExercise(80, bonus), null);
+    assert.equal(progression.submitExercise(80, bonus), null);
+    assert.deepEqual(progression.submitExercise(80, bonus), { level: 4 });
+  }
+});
+
+test('125% is freely available at every density, capped, and can slow to 100%', () => {
+  for (const level of [1, 2, 3, 4]) {
+    const bonus = exerciseAt(125, level);
+    assert.equal(bonus.playbackBpm, 150);
+    assert.equal(bonus.practiceOnly, false);
+    assert.equal(bonus.nextSpeed, null);
+    assert.equal(bonus.previousSpeed, 100);
+    const progression = new Progression(4);
+    progression.selectLevel(level);
+    for (let i = 0; i < 2; i++) assert.equal(progression.submitExercise(0, bonus), null);
+    assert.deepEqual(progression.submitExercise(0, bonus), { nextSpeed: 100, slowedDown: true });
+    assert.equal(progression.level, level);
+    assert.equal(progression.submitExercise(80, bonus), null);
+    assert.equal(progression.submitExercise(80, bonus), null);
+    assert.deepEqual(progression.submitExercise(80, bonus), { level: Math.min(4, level + 1) });
+  }
+  assert.throws(() => exerciseAt(126), /25% to 125%/);
+  for (const options of [{ bar: 0 }, { bpm: 80 }]) {
+    const exercise = practiceExercise(pattern(4), { bpm: 120, normalBpm: 120, speed: 125, ...options });
+    assert.equal(exercise.practiceOnly, true);
+    assert.equal(exercise.nextSpeed, null);
+    assert.equal(exercise.previousSpeed, null);
+  }
+});
+
+test('mastery fanfare follows major and minor keys, including accidentals', () => {
+  assert.deepEqual(masteryFanfarePitches('C'), [60, 60, 60, 64, 67, 72, 67, 72]);
+  assert.deepEqual(masteryFanfarePitches('Dm'), [62, 62, 62, 65, 69, 74, 69, 74]);
+  assert.deepEqual(masteryFanfarePitches('Bb'), [70, 70, 70, 74, 77, 82, 77, 82]);
+  assert.deepEqual(masteryFanfarePitches('F#m'), [66, 66, 66, 69, 73, 78, 73, 78]);
+  assert.deepEqual(masteryFanfarePitches('Cb'), masteryFanfarePitches('B'));
+  assert.throws(() => masteryFanfarePitches('Unknown'), /known major or minor key/);
 });
 
 function harness() {
@@ -269,14 +321,79 @@ test('encouragement uses the correct sample groups, avoids repeats, and respects
   assert.throws(() => new AudioEngine().encourage('up'), /Load encouragement/);
 });
 
-test('encouragement preloads and decodes each WAV once, using encoded asset URLs', async t => {
+test('all original samples have a unique mono MP3 in the cue rotation, under a 512 KiB delivery budget', async () => {
+  const files = Object.values(ENCOURAGEMENT_SAMPLES).flat();
+  const originals = await readdir(new URL('../audio-source/band-leader/', import.meta.url));
+  const cleaned = await readdir(new URL('../audio-source/band-leader-cleaned/', import.meta.url));
+  const published = await readdir(new URL('../public/samples/', import.meta.url));
+  assert.equal(files.length, 30, 'Only the 30 approved full-track clips remain');
+  for (const group of Object.values(ENCOURAGEMENT_SAMPLES)) assert.ok(group.length >= 2, 'Each cue group can avoid immediate repeats');
+  assert.equal(new Set(files).size, files.length);
+  assert.deepEqual([...files].sort(), originals.map(file => file.replace(/\.wav$/, '.mp3')).sort());
+  assert.deepEqual(cleaned.sort(), [...originals].sort(), 'Every original has a cleaned master');
+  assert.deepEqual(published.sort(), [...files].sort(), 'Only compressed samples belong in public assets');
+  let bytes = 0;
+  for (const file of files) {
+    const master = await readFile(new URL(`../audio-source/band-leader-cleaned/${encodeURIComponent(file.replace(/\.mp3$/, '.wav'))}`, import.meta.url));
+    assert.equal(master.toString('ascii', 0, 4), 'RIFF');
+    assert.equal(master.toString('ascii', 8, 12), 'WAVE');
+    assert.equal(master.readUInt16LE(22), 1, `${file} has a mono lossless master`);
+    const data = await readFile(new URL(`../public/samples/${encodeURIComponent(file)}`, import.meta.url));
+    const header = data.readUInt32BE(0);
+    assert.equal(header >>> 21, 0x7ff, `${file} has an MPEG audio frame`);
+    assert.equal((header >>> 19) & 3, 3, `${file} uses MPEG-1`);
+    assert.equal((header >>> 17) & 3, 1, `${file} uses Layer III (MP3)`);
+    assert.equal((header >>> 6) & 3, 3, `${file} is mono`);
+    bytes += data.length;
+  }
+  assert.ok(bytes <= 512 * 1024, `Compressed sample total is ${bytes} bytes`);
+  assert.ok(ENCOURAGEMENT_SAMPLES.up.every(file => /^(come on|pick it up)/.test(file)));
+  assert.ok(ENCOURAGEMENT_SAMPLES.down.every(file => /^(drop it back|drop it down|lay back)/.test(file)));
+  assert.ok(ENCOURAGEMENT_SAMPLES.advance.every(file => /^(feel the pocket|lets go|lock it in|yeah like that)/.test(file)));
+});
+
+test('full-track phrase cuts preserve names, require confident matches, and include the planned natural tail', async () => {
+  const plan = JSON.parse(await readFile(new URL('../audio-source/band-leader-segments.json', import.meta.url), 'utf8'));
+  const expected = Object.values(ENCOURAGEMENT_SAMPLES).flat().map(file => file.replace(/\.mp3$/, '.wav')).sort();
+  assert.deepEqual(Object.keys(plan.clips).sort(), expected, 'Every playable sample comes from the approved full track');
+  assert.ok(Object.keys(plan.clips).length > 0);
+  assert.equal(plan.sampleRate, 44100);
+  assert.equal(plan.leadMilliseconds, 25);
+  assert.equal(plan.tailMilliseconds, 150);
+  const frames = bytes => {
+    let align = 0;
+    let dataSize;
+    for (let offset = 12; offset + 8 <= bytes.length;) {
+      const size = bytes.readUInt32LE(offset + 4);
+      const kind = bytes.toString('ascii', offset, offset + 4);
+      assert.ok(offset + 8 + size <= bytes.length, 'WAV chunks are complete');
+      if (kind === 'fmt ') align = bytes.readUInt16LE(offset + 20);
+      if (kind === 'data') dataSize = size;
+      offset += 8 + size + size % 2;
+    }
+    assert.ok(align > 0 && dataSize > 0);
+    return dataSize / align;
+  };
+  for (const file of expected) {
+    const source = await readFile(new URL(`../audio-source/band-leader/${encodeURIComponent(file)}`, import.meta.url));
+    const master = await readFile(new URL(`../audio-source/band-leader-cleaned/${encodeURIComponent(file)}`, import.meta.url));
+    const originalFrames = frames(source);
+    const segment = plan.clips[file];
+    assert.ok(segment.correlation >= .85 && segment.correlation <= 1, `${file} has a confident name match`);
+    assert.equal(segment.referenceFrames, originalFrames);
+    assert.equal(segment.startFrame, Math.max(0, segment.referenceStartFrame - Math.round(44100 * .025)));
+    assert.equal(segment.endFrame, Math.min(plan.modelOutput.frames, segment.referenceStartFrame + originalFrames + 6615));
+    assert.equal(frames(master), segment.endFrame - segment.startFrame, `${file} includes its full phrase and tail`);
+  }
+});
+
+test('encouragement preloads and decodes each MP3 once, using encoded asset URLs', async t => {
   const requested = [];
   t.mock.method(globalThis, 'fetch', async url => {
     requested.push(url);
     const file = decodeURIComponent(url.split('/').at(-1));
     const data = await readFile(new URL(`../public/samples/${encodeURIComponent(file)}`, import.meta.url));
-    assert.equal(data.toString('ascii', 0, 4), 'RIFF');
-    assert.equal(data.toString('ascii', 8, 12), 'WAVE');
+    assert.equal(data.readUInt32BE(0) >>> 21, 0x7ff);
     return new Response(data);
   });
   const audio = new AudioEngine();
@@ -301,4 +418,123 @@ test('sample load errors are explicit and a later attempt can retry', async t =>
   audio.encouragementBuffers.clear();
   audio.context.decodeAudioData = async () => { throw new Error('Invalid WAV'); };
   await assert.rejects(audio.loadEncouragement(), /Invalid WAV/);
+});
+
+test('None mutes every SFX cue without stopping instruments or metronome clicks', async t => {
+  const audio = new AudioEngine();
+  let stopped = 0;
+  audio.celebrationVoices.add({ stop: () => stopped++ });
+  audio.clickVoices.add({ stop: () => { throw new Error('SFX preferences must not stop the click'); } });
+  audio.voices.set('instrument', {});
+  audio.setSfxType('none');
+  assert.equal(stopped, 1);
+  assert.equal(audio.celebrationVoices.size, 0);
+  assert.equal(audio.voices.size, 1);
+  assert.equal(audio.clickVoices.size, 1);
+  t.mock.method(globalThis, 'fetch', () => { throw new Error('None must not fetch samples'); });
+  await audio.loadEncouragement();
+  for (const kind of Object.keys(ENCOURAGEMENT_SAMPLES)) audio.encourage(kind);
+  audio.masteryFanfare(masteryFanfarePitches('Dm'));
+  assert.equal(audio.celebrationVoices.size, 0);
+  assert.throws(() => audio.setSfxType('invalid'), /Band leader, Video game or None/);
+  assert.equal(audio.sfxType, 'none');
+});
+
+test('Video game synthesizes short, long, rising and falling cues without loading samples', async t => {
+  const audio = new AudioEngine();
+  const oscillators = [];
+  audio.context = {
+    currentTime: 10,
+    createOscillator: () => {
+      const oscillator = {
+        frequency: {}, connect() {}, disconnect() {},
+        start(time) { this.startTime = time; },
+        stop(time) { this.stopTime = time; },
+      };
+      oscillators.push(oscillator);
+      return oscillator;
+    },
+    createGain: () => ({
+      gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} },
+      connect(output) { assert.equal(output, audio.gain); }, disconnect() {},
+    }),
+  };
+  audio.gain = {};
+  audio.setSfxType('video-game');
+  t.mock.method(globalThis, 'fetch', () => { throw new Error('Video game must not fetch samples'); });
+  await audio.loadEncouragement();
+  const durations = {};
+  for (const kind of ['qualifying', 'advance', 'up', 'down']) {
+    const before = oscillators.length;
+    audio.encourage(kind);
+    const notes = oscillators.slice(before);
+    assert.equal(notes.length, kind === 'qualifying' ? 2 : kind === 'advance' ? 5 : 4);
+    durations[kind] = notes.at(-1).stopTime - 10;
+    if (kind === 'up' || kind === 'down') {
+      const frequencies = notes.map(note => note.frequency.value);
+      assert.deepEqual(frequencies, [...frequencies].sort((a, b) => kind === 'up' ? a - b : b - a));
+    }
+    audio.silence({ feedback: false });
+    assert.equal(audio.celebrationVoices.size, notes.length, 'loop boundaries preserve game cues');
+    audio.silence();
+    assert.equal(audio.celebrationVoices.size, 0, 'Stop cancels game cues');
+    assert.ok(notes.every(note => note.stopTime === undefined));
+    notes.forEach(note => note.onended());
+  }
+  assert.ok(durations.advance > durations.qualifying);
+  audio.setSfxType('band-leader');
+  assert.throws(() => audio.encourage('qualifying'), /Load encouragement samples/);
+});
+
+test('brass mastery fanfare is scheduled in key without touching MIDI channels and survives only normal loop boundaries', () => {
+  for (const type of ['band-leader', 'video-game']) {
+    const audio = new AudioEngine();
+    audio.setSfxType(type);
+    const oscillators = [];
+    const wave = {};
+    audio.context = {
+      currentTime: 10,
+      createPeriodicWave(real, imaginary) {
+        assert.ok(real instanceof Float32Array && imaginary instanceof Float32Array);
+        assert.ok(imaginary.filter(value => value > 0).length > 4, 'Brass has a rich harmonic spectrum');
+        return wave;
+      },
+      createOscillator() {
+        const oscillator = {
+          frequency: {}, connect() {}, disconnect() {},
+          setPeriodicWave(value) { assert.equal(value, wave); },
+          start(time) { this.startTime = time; },
+          stop(time) { this.stopTime = time; },
+        };
+        oscillators.push(oscillator);
+        return oscillator;
+      },
+      createGain: () => ({
+        gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} },
+        connect(output) { assert.equal(output, audio.gain); }, disconnect() {},
+      }),
+    };
+    audio.gain = {};
+    audio.synth = { midiProgramSelect() { assert.fail('Fanfare must not change backing instruments'); } };
+    let replaced = false;
+    audio.celebrationVoices.add({ stop() { replaced = true; } });
+    const pitches = masteryFanfarePitches('Dm');
+    audio.masteryFanfare(pitches);
+    assert.equal(replaced, true, 'Fanfare replaces, rather than overlaps, ordinary encouragement');
+    assert.deepEqual(oscillators.map(note => note.frequency.value), pitches.map(pitch => 440 * 2 ** ((pitch - 69) / 12)));
+    assert.equal(audio.celebrationVoices.size, pitches.length);
+    assert.equal(oscillators[0].startTime, 10);
+    assert.ok(oscillators.at(-1).stopTime - oscillators.at(-1).startTime > .6, 'Final trumpet note is sustained');
+    audio.silence({ feedback: false });
+    assert.equal(audio.celebrationVoices.size, pitches.length);
+    audio.silence();
+    assert.equal(audio.celebrationVoices.size, 0);
+    assert.ok(oscillators.every(note => note.stopTime === undefined), 'Stop cancels even future scheduled notes');
+    oscillators.forEach(note => note.onended());
+    audio.masteryFanfare(pitches);
+    audio.setSfxType('none');
+    assert.equal(audio.celebrationVoices.size, 0, 'Switching to None cancels the fanfare');
+    assert.throws(() => audio.masteryFanfare([]), /valid MIDI pitches/);
+    assert.throws(() => audio.masteryFanfare([128]), /valid MIDI pitches/);
+  }
 });

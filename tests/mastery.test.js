@@ -42,6 +42,12 @@ test('unlocking the top level is distinct from mastering the top level', () => {
   assert.equal(qualifiesForDetailedMastery({
     completedLevel: 4, maxLevel: 4, nextLevel: 4, nextSpeed: 100,
   }), false);
+  assert.equal(qualifiesForDetailedMastery({
+    completedLevel: 4, maxLevel: 4, nextLevel: 4, nextSpeed: 125,
+  }), true);
+  assert.equal(qualifiesForDetailedMastery({
+    completedLevel: 3, maxLevel: 4, nextLevel: 4, nextSpeed: 125,
+  }), false);
 });
 
 test('v1 mastery migrates as legacy history without inventing detailed completion', () => {

@@ -1,11 +1,218 @@
 import { Notation } from '../src/notation.js';
 import { createDemo } from '../src/midi.js';
-import { buildExercise, styleTracks } from '../src/training.js';
+import { buildExercise, masteryFanfarePitches, styleTracks } from '../src/training.js';
 import { clearSavedSounds, readSavedSounds, saveSounds, validateStarter } from '../src/soundfont-cache.js';
 import { AudioEngine } from '../src/audio.js';
+import { ENCOURAGEMENT_SAMPLES } from '../src/assets.js';
 import { Transport } from '../src/transport.js';
+import { MidiController } from '../src/controller.js';
 import { PianoKeyboard } from '../src/piano.js';
 import { forgetLastStyle, forgetStyleFolder, readLastStyle, readStyleFolder, saveLastStyle, saveStyleFolder } from '../src/style-folder.js';
+
+export async function verifyMidiInputAudio({ expectSetup = false, blocked = false } = {}) {
+  const $ = id => document.getElementById(id);
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(message);
+    checks.push(message);
+  };
+  const waitFor = async predicate => {
+    const limit = performance.now() + 5000;
+    while (!predicate()) {
+      if (performance.now() > limit) throw new Error('MIDI audio preparation timed out.');
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  };
+  const original = {
+    resume: AudioEngine.prototype.resume, load: AudioEngine.prototype.loadSoundfont,
+    on: AudioEngine.prototype.on, off: AudioEngine.prototype.off,
+    output: MidiController.prototype.setOutput, fetch: globalThis.fetch,
+  };
+  let controller;
+  let audio;
+  let previousContext;
+  let unlock;
+  let finishLoad;
+  let failNext = false;
+  let loads = 0;
+  let requests = 0;
+  const played = [];
+  const released = [];
+  MidiController.prototype.setOutput = function() { controller = this; };
+  AudioEngine.prototype.resume = function() {
+    if (!audio) {
+      audio = this;
+      previousContext = this.context;
+      this.context = { state: blocked ? 'suspended' : 'running' };
+      check(this.soundfont === null, 'Test starts with no loaded SoundFont');
+    }
+    if (blocked && !unlock) return new Promise(resolve => {
+      unlock = () => { this.context.state = 'running'; resolve(); };
+    });
+    if (unlock) unlock();
+    return Promise.resolve();
+  };
+  AudioEngine.prototype.loadSoundfont = async function() {
+    loads++;
+    if (failNext) throw new Error('Test SoundFont load failed');
+    await new Promise(resolve => { finishLoad = resolve; });
+    this.soundfont = 1;
+  };
+  AudioEngine.prototype.on = function(note) { played.push(note); };
+  AudioEngine.prototype.off = function(note) { released.push(note); };
+  globalThis.fetch = async (...args) => {
+    if (/\.sf2(?:[?#]|$)/.test(String(args[0]))) {
+      requests++;
+      return new Response(new TextEncoder().encode('RIFF0000sfbk'));
+    }
+    return original.fetch(...args);
+  };
+  try {
+    $('stop').click();
+    $('preview').checked = false;
+    $('preview').dispatchEvent(new Event('change'));
+    $('midi-output').dispatchEvent(new Event('change'));
+    check(Boolean(controller), 'Uses the same input callback as a remembered MIDI port');
+    controller.onInput(60, true, 90);
+    controller.onInput(61, true, 95);
+    controller.onInput(60, false);
+    check(played.length === 0, 'Notes do not sound before audio is ready');
+    if (blocked) {
+      check($('notice').textContent.includes('Click or tap'), 'Browser activation requirements are clearly shown');
+      check(requests === 0, 'No SoundFont download starts while audio activation is blocked');
+      document.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    }
+    if (expectSetup) {
+      await waitFor(() => $('devices-dialog').open);
+      check(requests === 0 && loads === 0, 'Unsaved public starter sounds still require an explicit choice');
+      $('preview').checked = true;
+      $('preview').dispatchEvent(new Event('change'));
+      await waitFor(() => played.length === 1);
+      check(played[0].pitch === 61 && requests === 0, 'Explicit Preview synth resumes only the held MIDI note without downloading');
+      controller.onInput(61, false);
+      return checks;
+    }
+    await waitFor(() => loads === 1);
+    check(requests === 1, 'First MIDI notes automatically request the local SoundFont exactly once');
+    finishLoad();
+    await waitFor(() => played.length === 1);
+    check(played[0].pitch === 61, 'Only the still-held note sounds after loading; released notes are not replayed');
+    check($('stop').getAttribute('aria-pressed') === 'true', 'Audio preparation does not start the practice transport');
+    controller.onInput(61, false);
+    check(released.some(note => note.pitch === 61), 'A held note releases normally after delayed preparation');
+    controller.onInput(62, true, 80);
+    controller.onInput(62, false);
+    check(played.at(-1).pitch === 62 && requests === 1, 'Later notes sound immediately without reloading');
+
+    await waitFor(() => !$('load-local-font').disabled);
+    audio.soundfont = null;
+    $('load-local-font').click();
+    await waitFor(() => loads === 2);
+    controller.onInput(63, true, 90);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    check(loads === 2 && requests === 2, 'Manual loading and MIDI preparation share one in-flight SoundFont load');
+    finishLoad();
+    await waitFor(() => played.some(note => note.pitch === 63));
+    controller.onInput(63, false);
+    check(played.filter(note => note.pitch === 63).length === 1, 'A held note is not sounded twice after a shared load');
+
+    await waitFor(() => !$('load-local-font').disabled);
+    audio.soundfont = null;
+    failNext = true;
+    controller.onInput(64, true, 90);
+    await waitFor(() => $('notice').getAttribute('role') === 'alert');
+    check($('notice').textContent.includes('Test SoundFont load failed'), 'Automatic loading errors are explicit');
+    controller.onInput(64, false);
+    failNext = false;
+    await waitFor(() => !$('load-local-font').disabled);
+    controller.onInput(65, true, 90);
+    await waitFor(() => loads === 4);
+    finishLoad();
+    await waitFor(() => played.some(note => note.pitch === 65));
+    check(!played.some(note => note.pitch === 64), 'Failed preparation can retry without playing an old released note');
+    controller.onInput(65, false);
+    return checks;
+  } finally {
+    if (audio) {
+      controller.onInput(null, false);
+      audio.soundfont = null;
+      audio.context = previousContext;
+    }
+    $('preview').checked = false;
+    if (audio) audio.preview = false;
+    $('stop').click();
+    if ($('devices-dialog').open) $('devices-dialog').close();
+    AudioEngine.prototype.resume = original.resume;
+    AudioEngine.prototype.loadSoundfont = original.load;
+    AudioEngine.prototype.on = original.on;
+    AudioEngine.prototype.off = original.off;
+    MidiController.prototype.setOutput = original.output;
+    globalThis.fetch = original.fetch;
+  }
+}
+
+export async function verifySfxSettings() {
+  const $ = id => document.getElementById(id);
+  const key = 'style-trainer-sfx-type';
+  const saved = localStorage.getItem(key);
+  const setSfxType = AudioEngine.prototype.setSfxType;
+  let audio;
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(message);
+    checks.push(message);
+  };
+  AudioEngine.prototype.setSfxType = function(type) {
+    audio = this;
+    return setSfxType.call(this, type);
+  };
+  const select = value => {
+    $('sfx-type').value = value;
+    $('sfx-type').dispatchEvent(new Event('change'));
+  };
+  try {
+    $('stop').click();
+    $('open-devices').click();
+    check([...$('sfx-type').options].map(option => option.textContent).join(',') === 'Band leader,Video game,None', 'Settings offers all three SFX types');
+    select('video-game');
+    check(audio.sfxType === 'video-game' && localStorage.getItem(key) === 'video-game', 'Video game selection applies and persists');
+    await audio.resume();
+    audio.encourage('qualifying');
+    check(audio.celebrationVoices.size === 2, 'Video game mode plays synthesized encouragement');
+    audio.click(true);
+    select('none');
+    check(audio.celebrationVoices.size === 0 && audio.clickVoices.size === 1, 'None stops SFX without muting the metronome');
+    audio.encourage('advance');
+    audio.tempoChange('down');
+    check(audio.celebrationVoices.size === 0, 'None suppresses achievement and tempo-change cues');
+    select('band-leader');
+    await audio.loadEncouragement();
+    audio.encourage('qualifying');
+    check(ENCOURAGEMENT_SAMPLES.qualifying.includes(audio.lastEncouragement.get('qualifying')), 'Band leader restores spoken samples');
+    check(Object.values(ENCOURAGEMENT_SAMPLES).flat().every(file => audio.encouragementBuffers.get(file)?.numberOfChannels === 1), 'Every MP3 decodes successfully as mono audio');
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(name, value) {
+      if (name === key) throw new DOMException('Storage denied', 'SecurityError');
+      return setItem.call(this, name, value);
+    };
+    try {
+      select('none');
+      check(audio.sfxType === 'none' && $('notice').getAttribute('role') === 'alert' &&
+        $('notice').textContent.includes('could not be remembered'), 'Storage failure is reported while the selected mode still works');
+    } finally { Storage.prototype.setItem = setItem; }
+    return checks;
+  } finally {
+    if (audio) {
+      audio.stopEncouragement();
+      setSfxType.call(audio, saved ?? 'band-leader');
+      $('sfx-type').value = audio.sfxType;
+    }
+    AudioEngine.prototype.setSfxType = setSfxType;
+    if (saved === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, saved);
+    $('devices-dialog').close();
+  }
+}
 
 export async function verifyStyleSnapshotStorage() {
   const previous = await readLastStyle();
@@ -43,7 +250,7 @@ export async function verifyStyleSnapshotStorage() {
   }
 }
 
-export async function verifyContinuousGameplay() {
+export async function verifyContinuousGameplay({ preserveMastery = false } = {}) {
   const $ = id => document.getElementById(id);
   const checks = [];
   const check = (condition, message) => {
@@ -54,8 +261,11 @@ export async function verifyContinuousGameplay() {
   const start = Transport.prototype.start;
   const cue = AudioEngine.prototype.tempoChange;
   const encourage = AudioEngine.prototype.encourage;
+  const fanfare = AudioEngine.prototype.masteryFanfare;
   const directions = [];
   const encouragements = [];
+  const fanfares = [];
+  let audio;
   let transport;
   let now = performance.now();
   Transport.prototype.start = function(...args) {
@@ -71,6 +281,11 @@ export async function verifyContinuousGameplay() {
   AudioEngine.prototype.encourage = function(kind) {
     encourage.call(this, kind);
     encouragements.push({ kind, file: this.lastEncouragement.get(kind) });
+  };
+  AudioEngine.prototype.masteryFanfare = function(pitches) {
+    audio = this;
+    fanfares.push(pitches);
+    fanfare.call(this, pitches);
   };
   const advance = time => { now = time; transport.tick(); };
   const completeLoop = (perfect, closeFirst = false) => {
@@ -106,7 +321,7 @@ export async function verifyContinuousGameplay() {
       if (speed === 75) {
         completeLoop(.85);
         check(encouragements.at(-1)?.kind === 'qualifying', 'A qualifying non-perfect loop plays a short encouragement');
-        check(['huh.wav', 'yeah.wav'].includes(encouragements.at(-1).file), 'Qualifying loops use huh or yeah');
+        check(ENCOURAGEMENT_SAMPLES.qualifying.includes(encouragements.at(-1).file), 'Qualifying loops use the expanded short-reaction selection');
         const shortCount = encouragements.length;
         completeLoop(.75);
         check(encouragements.length === shortCount, 'A below-80% loop does not play an achievement sample');
@@ -122,7 +337,7 @@ export async function verifyContinuousGameplay() {
       }
       check($('streak').querySelectorAll('.filled.pass').length === 3, 'All three LEDs stay lit until advancement applies');
       check(encouragements.at(-1)?.kind === 'advance', 'The third qualifying loop uses a longer achievement phrase');
-      check(['lets go.wav', 'yeah like that.wav'].includes(encouragements.at(-1).file), 'Achievement phrases contain multiple syllables');
+      check(ENCOURAGEMENT_SAMPLES.advance.includes(encouragements.at(-1).file), 'Achievement phrases contain multiple syllables');
       check(transport.pending?.practiceSpeed === speed, `${speed}% speed queued after three qualifying loops`);
       completeLoop(true);
       check(transport.exercise.practiceSpeed === speed, `${speed}% speed applied at boundary`);
@@ -140,8 +355,8 @@ export async function verifyContinuousGameplay() {
     check(transport.exercise.practiceSpeed === 75 && transport.exercise.level === 2, 'Slowdown preserves unlocked density');
     check(directions.join(',') === 'up,up,down', 'Spoken tempo cues match speed changes, not density changes');
     check(encouragements.some(cue => cue.kind === 'qualifying'), 'Qualifying four-bar patterns play encouragement samples');
-    check(encouragements.filter(cue => cue.kind === 'up').every(cue => ['bring it up.wav', 'come on.wav'].includes(cue.file)), 'Speed increases use only the assigned spoken samples');
-    check(encouragements.filter(cue => cue.kind === 'down').every(cue => ['drop it back.wav', 'drop it down.wav', 'lay back.wav'].includes(cue.file)), 'Slowdowns use only drop or lay back samples');
+    check(encouragements.filter(cue => cue.kind === 'up').every(cue => ENCOURAGEMENT_SAMPLES.up.includes(cue.file)), 'Speed increases use only the assigned spoken samples');
+    check(encouragements.filter(cue => cue.kind === 'down').every(cue => ENCOURAGEMENT_SAMPLES.down.includes(cue.file)), 'Slowdowns use only drop or lay back samples');
     check($('practice-status').textContent.includes('90 BPM'), 'Displayed BPM matches the slowed transport');
     check($('record').getAttribute('aria-pressed') === 'true', 'Record stays active after slowdown');
     for (let i = 0; i < 3; i++) completeLoop(false);
@@ -150,6 +365,43 @@ export async function verifyContinuousGameplay() {
     check(transport.mode === 'stop', 'Explicit Stop still ends recording');
     check($('practice-status').textContent.includes('60 BPM'), 'Stopping with a queued change keeps settings and notation in sync');
     check(directions.length === 3, 'Explicit Stop does not play an extra cue');
+
+    $('layers').children[0].click();
+    $('practice-speed').value = '125';
+    $('practice-speed').dispatchEvent(new Event('change'));
+    check($('practice-status').textContent.includes('125% bonus speed'), '125% bonus speed can be selected at level 1 without unlocking it');
+    $('record').click();
+    await waitForRecord();
+    check(transport.exercise.playbackBpm === 150 && transport.exercise.level === 1, 'Manual bonus speed plays at 125% of the header tempo');
+    $('stop').click();
+    $('practice-speed').value = '100';
+    $('practice-speed').dispatchEvent(new Event('change'));
+    $('harmony-key').value = 'Dm';
+    $('harmony-key').dispatchEvent(new Event('change'));
+    $('randomize-chords').click();
+    $('layers').children[3].click();
+    $('record').click();
+    await waitForRecord();
+    for (let i = 0; i < 3; i++) completeLoop(true);
+    check($('layers').children[3].textContent.includes('✓'), 'Mastering level 4 immediately checks its own tile');
+    check($('layers').children[3].getAttribute('aria-label').includes('mastered'), 'The level 4 checkmark has an accessible mastered label');
+    check($('streak').querySelectorAll('.filled.pass').length === 3, 'Mastery keeps all three LEDs lit until bonus speed applies');
+    check(transport.pending?.practiceSpeed === 125 && transport.pending?.level === 4, 'Level 4 mastery queues bonus speed at the same density');
+    check(JSON.stringify(fanfares.at(-1)) === JSON.stringify(masteryFanfarePitches('Dm')), 'Mastery fanfare follows the selected minor key');
+    check(audio.celebrationVoices.size === 8, 'Mastery plays the special brass fanfare instead of the ordinary phrase');
+    const directionsBeforeBonus = directions.length;
+    completeLoop(true);
+    check(transport.exercise.practiceSpeed === 125 && transport.exercise.playbackBpm === 150, 'Bonus tempo applies at the next boundary');
+    check(transport.mode === 'record' && directions.length === directionsBeforeBonus, 'Bonus transition continues recording without replacing the fanfare with an ordinary tempo cue');
+    check($('streak').querySelectorAll('.filled.pass').length === 0, 'Bonus speed starts a fresh LED count');
+    for (let i = 0; i < 3; i++) completeLoop(true);
+    check(transport.exercise.practiceSpeed === 125 && !transport.pending && transport.mode === 'record', 'Further mastery continues looping at the 125% cap');
+    for (let i = 0; i < 3; i++) completeLoop(false);
+    check(transport.pending?.practiceSpeed === 100, 'Struggling at bonus speed queues a slowdown to 100%');
+    completeLoop(false);
+    check(transport.exercise.practiceSpeed === 100 && $('layers').children[3].textContent.includes('✓'), 'Slowing from bonus speed preserves the level 4 checkmark');
+    $('stop').click();
+    check(audio.celebrationVoices.size === 0, 'Explicit Stop cancels all remaining mastery sounds');
     const beforeDrill = encouragements.length;
     $('practice-bar').value = '0';
     $('practice-bar').dispatchEvent(new Event('change'));
@@ -164,9 +416,12 @@ export async function verifyContinuousGameplay() {
     Transport.prototype.start = start;
     AudioEngine.prototype.tempoChange = cue;
     AudioEngine.prototype.encourage = encourage;
+    AudioEngine.prototype.masteryFanfare = fanfare;
     if (transport) transport.now = () => performance.now();
-    if (savedMastery === null) localStorage.removeItem('style-trainer-mastery-v2');
-    else localStorage.setItem('style-trainer-mastery-v2', savedMastery);
+    if (!preserveMastery) {
+      if (savedMastery === null) localStorage.removeItem('style-trainer-mastery-v2');
+      else localStorage.setItem('style-trainer-mastery-v2', savedMastery);
+    }
   }
 }
 

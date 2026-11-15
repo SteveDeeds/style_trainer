@@ -75,6 +75,12 @@ the selected practice track's instrument; accuracy changes notation/feedback,
 not the instrument. With no identifiable instrument, monitoring defaults to
 GM acoustic piano. Connecting MIDI without sounds opens sound setup in the
 public edition; MIDI input alone cannot download audio without a user choice.
+After a remembered MIDI port reconnects, the first note automatically loads
+the local SoundFont or previously saved starter sounds. If the browser blocks
+audio activation, click or tap the page once when prompted. Notes released
+while sounds load are not played late; notes still held begin sounding when
+ready. This does not start practice playback. Unsaved public starter sounds
+still require an explicit choice, and loading errors are shown with a retry.
 
 In **Choose your style**, selecting a library entry auditions its Main A
 section once over four bars of **C - G - Am - F**, with all parts at full
@@ -300,9 +306,11 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
   the quiz's final ±1/16-note scoring grace window.
 - **Three eligible loops each scoring ≥80%** unlock the next density
   layer without stopping recording. Changes take effect at the next loop boundary
-  after scoring, with no new count-in. At the top level,
-  the same three qualifying loops celebrate mastery and keep going without
-  exceeding the maximum. These loops **do not need to be consecutive**: lower
+  after scoring, with no new count-in. Mastering **Level 4 at 100%** saves a
+  checkmark on its tile, plays an in-key trumpet-style fanfare, and queues
+  **125% bonus speed** without stopping. At 125%, qualifying loops keep
+  celebrating mastery without increasing speed further.
+  These loops **do not need to be consecutive**: lower
   scores do not remove earned qualifying loops, and a high average alone does
   not count as three qualifying loops.
   Each changed speed or density starts a fresh qualifying-loop count; results
@@ -313,15 +321,18 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
 - **Loop range** selects any one bar of the current 1–8-bar pattern, including
   the last bar. Notes and backing are clipped to that bar and repeated. Notes
   sustained across its starting boundary begin at the drill's start.
-- **Practice speed** selects 25%, 50%, 75%, 90%, or 100% of the header BPM.
+- **Practice speed** selects 25%, 50%, 75%, 90%, 100%, or **125% bonus speed**
+  of the header BPM. Bonus speed is freely selectable at any density level;
+  no mastery or unlock is required.
   At full-pattern settings with the header BPM at least the section's original
   BPM, **50% → 75% → 100%** is a speed ladder. Three loops individually scoring
   **≥80%**, not necessarily consecutively, queue the next speed with a spoken encouragement sample, keeping the same
   density level and recording continuously.
-  At 100%, the three qualifying loops pass the density level (or celebrate mastery)
-  exactly as when starting directly at 100%. The next density stays at 100%;
+  At 100%, the three qualifying loops pass the density level; the next density
+  stays at 100%. Completing Level 4 instead moves to 125%. At manually selected
+  125%, eligible density advances keep the selected bonus speed;
   a three-loop average **below 60%** automatically eases the tempo one step
-  (**100% → 75% → 50%**) with a spoken slowdown sample. Slowdowns preserve the density
+  (**125% → 100% → 75% → 50%**) with a spoken slowdown sample. Slowdowns preserve the density
   level and never go below 50%. At exactly 60% the tempo stays unchanged.
   Single-bar drills, a lowered header BPM, and manual 25%/90% speeds remain
   practice-only with no automatic advancement or slowdown.
@@ -329,14 +340,55 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
   practice controls can be changed while stopped. Randomized harmony is also
   eligible for the speed ladder. With **Loop off**, the current pass still
   finishes and stops normally; automatic progression never forces looping on.
-- **Encouragement samples** in `public/samples` replace synthesized achievement
-  noises. Each eligible pattern of four bars or more scoring **80% or higher**
+- **Sound effects** in **Devices & audio** selects **Band leader** (default),
+  **Video game**, or **None** while stopped. The preference is saved in this
+  browser. Band leader plays the spoken samples described below; Video game
+  uses a short synthesized success cue, a longer achievement arpeggio, and
+  rising/falling arpeggios for tempo changes. None mutes only these effects,
+  not instruments or metronome clicks. Scoring and LEDs work in every mode.
+  Video game and None do not fetch or decode encouragement samples.
+  In either audible mode, Level 4 mastery replaces the ordinary achievement
+  sound with a synthesized brass fanfare in the current major/minor key.
+  It uses independent Web Audio voices, so backing instruments never change.
+  If the key is unknown, the source harmony or played notes supply an inferred
+  key; with no tonal information, a notification identifies the C-key fallback.
+  None also mutes this fanfare. Mastery checkmarks survive reloads and slowdowns.
+- **Band leader encouragement samples** in `public/samples` replace synthesized achievement
+  noises. Only the 30 approved full-track clips are used; the 10 older
+  reverberant clips have been removed. Browser copies are mono, 44.1 kHz,
+  64 kbps MP3s. The approved clips' reference WAV originals live in
+  `audio-source/band-leader`, outside the published assets.
+  Lossless mono masters in `audio-source/band-leader-cleaned` use the approved
+  MelBand Roformer De-Reverb Less Aggressive model by anvuew. They are
+  level-matched to the originals with a 0.95 peak ceiling.
+  Regenerate MP3s from these cleaned masters with `.\scripts\compress-samples.ps1` when FFmpeg is on PATH,
+  or pass `-Ffmpeg 'C:\path\to\ffmpeg.exe'`. Add new filenames to the cue groups
+  in `src/assets.js` so they are included in playback and public releases.
+  De-reverb runs offline with `audio-separator`, not in the app. Its model and
+  Python environment stay in ignored `.tools/dereverb`; neither is published.
+  After processing the full track into `.tools/dereverb/full-track` with the
+  `dereverb_mel_band_roformer_less_aggressive_anvuew_sdr_18.8050.ckpt` model
+  (`--single_stem noreverb --output_format WAV --use_soundfile`),
+  `node .\scripts\prepare-clean-samples.mjs` prepares the cleaned masters.
+  Pass the FFmpeg executable path as its first argument if it is not on PATH.
+  `audio-source/band-leader-segments.json` selects phrases from the
+  checksum-verified full-track output. The required segment plan preserves
+  the existing cue names and adds 25 ms of lead-in and a 150 ms tail.
+  Only approved, confident full-track waveform matches are used;
+  unmatched names are never guessed. Keep the referenced full-track output
+  available when regenerating these masters.
+  Convert compressed full-track inputs to PCM WAV before using
+  `audio-separator --use_soundfile`; otherwise its input-subtype preservation
+  can incorrectly try to write MP3 encoding into the WAV output.
+  Each eligible pattern of four bars or more scoring **80% or higher**
   lights one of the three green progress LEDs. The first two qualifying loops
-  play a short "huh" or "yeah"; the third lights all three LEDs and plays a
-  longer "let's go" or "yeah like that" achievement phrase. All three LEDs stay
+  play a short reaction such as "huh", "yeah", "groovy", or "right there";
+  the third lights all three LEDs and plays a longer "let's go",
+  "feel the pocket", "lock it in", or "yeah like that" achievement phrase.
+  All three LEDs stay
   lit until the new speed or density applies, then reset for the next achievement.
   Below-threshold loops do not play an achievement clip or remove earned LEDs.
-  Tempo increases use "bring it up" or "come on"; slowdowns use "drop it back",
+  Tempo increases use "come on" or "pick it up"; slowdowns use "drop it back",
   "drop it down", or "lay back". Density changes alone do not play a tempo-change
   phrase. Each group varies its clips without repeating
   the last selection. Samples preload before Record, follow master volume,
