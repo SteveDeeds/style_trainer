@@ -170,6 +170,17 @@ npm run build
 npm run preview
 ```
 
+`node --test tests\yamaha.test.js` includes a RocknRoll matrix covering all
+12 major keys, all seven diatonic seventh chords per key, and every section.
+It prints the resulting Main A bass phrases for each key/chord, checks both
+targets and backing against the key and CASM pitch limits, and verifies that
+Bypass phrases and drums remain unchanged. Authored chromatic offsets are
+tested separately, not forced into the destination scale. The real-style
+tests explicitly skip when the private
+`public/styles/Pop&Rock/RocknRoll.sty` fixture is absent; the synthetic chromatic
+tests still run. With the portable Windows runtime, replace `node` with
+`.\.tools\node\node.exe`.
+
 The install script copies the FluidSynth and synthesizer worklet assets into
 `public/synth`. These generated files are ignored by Git and included in builds.
 Local development uses the web server root. The public build supports the
@@ -283,7 +294,8 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
   inferred from that arrangement.
   Yamaha parts use their section/source-channel CASM source chord and
   transposition policies, not a chord guessed from the other instruments.
-  Root Trans Bass/Melody uses a key-aware diatonic shift: RocknRoll's
+  Root Trans Bass/Melody maps source scale degrees to the destination chord's
+  key-aware scale, retaining chromatic offsets: RocknRoll's
   C-E-G-A bass becomes A-C-E-F over Am7 in C major. Root Fixed Chord parts
   (e.g. its piano and organ) use nearest destination chord tones in their
   original register. Drums and Bypass parts do not transpose.
@@ -664,6 +676,10 @@ mute masks, on-bass/slash chord recognition and Yamaha XF chord meta-events are
 not currently applied. No source attacks are invented for these features.
 
 Format references:
+[Yamaha PSR-8000 manual, p. 71](https://manualsdump.com/en/manuals/yamaha-psr-8000/243609/71)
+describes the legacy Bass table as similar to Melody, with added on-bass chord
+recognition, not as a root-only shift. The degree mapping above is the trainer's
+approximation; on-bass recognition remains unsupported.
 [Yamaha CASM settings](http://www.jososoft.dk/yamaha/articles/style2_2.htm),
 [Ctab/Cntt format](http://www.jososoft.dk/yamaha/articles/casm_1.htm) and
 [Ctb2 format](http://www.jososoft.dk/yamaha/articles/casm_2.htm).

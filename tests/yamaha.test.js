@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { parseCasm, sourceHarmony, transposeYamaha } from '../src/yamaha.js';
 import { parseMidi } from '../src/midi.js';
-import { buildExercise, practiceExercise, randomHarmony, LoopScore } from '../src/training.js';
+import { buildExercise, pitchName, practiceExercise, randomHarmony, LoopScore } from '../src/training.js';
 
 const chunk = (tag, data) => {
   const header = Buffer.alloc(8);
@@ -31,6 +31,8 @@ const ctb2 = (channel, ntt) => {
   return chunk('Ctb2', data);
 };
 const am7 = randomHarmony('C', 1, () => 5 / 7)[0];
+const majorKeys = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+const majorIntervals = [0, 2, 4, 5, 7, 9, 11];
 
 test('CASM source root/chord, channel routing and NTR/NTT use documented offsets', () => {
   const bytes = casm([sectionNames('Main A,Main B'), ctab(3, { destination: 10, root: 2, chord: 10, ntr: 1, ntt: 2, highKey: 7, low: 28, high: 60 })]);
@@ -56,15 +58,79 @@ test('Cntt overrides and Ctb2 pitch ranges are decoded independently', () => {
   const policy = modern.channels[13];
   assert.equal(transposeYamaha({ pitch: 36, yamaha: policy }, am7), 36);
   assert.equal(transposeYamaha({ pitch: 60, yamaha: policy }, am7), 60);
-  assert.equal(transposeYamaha({ pitch: 76, yamaha: policy }, am7), 85);
+  assert.equal(transposeYamaha({ pitch: 76, yamaha: policy }, am7), 84);
   assert.equal(policy.ranges[2].bassOn, true);
 });
-test('Root Trans Bass retains melodic intervals from the authored source chord', () => {
-  const [group] = parseCasm(casm([sectionNames('Main A'), ctab(10)]), 0);
-  const policy = group.channels[10];
-  assert.deepEqual([24, 28, 31, 33].map(pitch => transposeYamaha({ pitch, yamaha: policy }, am7)), [33, 37, 40, 42]);
-  const fmaj7 = randomHarmony('C', 1, () => 3 / 7)[0];
-  assert.deepEqual([48, 52, 55, 57].map(pitch => transposeYamaha({ pitch, yamaha: policy }, fmaj7)), [53, 57, 60, 62]);
+test('Root Trans Bass and Melody adapt source degrees to destination harmony', () => {
+  for (const ntt of [1, 3]) {
+    const [group] = parseCasm(casm([sectionNames('Main A'), ctab(10, { ntt })]), 0);
+    const policy = group.channels[10];
+    assert.deepEqual([24, 28, 31, 33].map(pitch => transposeYamaha({ pitch, yamaha: policy }, am7)), [33, 36, 40, 41]);
+    const fmaj7 = randomHarmony('C', 1, () => 3 / 7)[0];
+    assert.deepEqual([48, 52, 55, 57].map(pitch => transposeYamaha({ pitch, yamaha: policy }, fmaj7)), [53, 57, 60, 62]);
+    const source = sourceHarmony(policy);
+    assert.deepEqual([24, 25, 28, 31, 33, 35, 36].map(pitch => transposeYamaha({ pitch, yamaha: policy }, source)),
+      [24, 25, 28, 31, 33, 35, 36]);
+  }
+});
+test('Bass and Melody follow every C-major mode, including sevenths and diminished fifths', () => {
+  const expected = [
+    [48, 50, 52, 53, 55, 57, 59],
+    [50, 52, 53, 55, 57, 59, 60],
+    [52, 53, 55, 57, 59, 60, 62],
+    [53, 55, 57, 59, 60, 62, 64],
+    [55, 57, 59, 60, 62, 64, 65],
+    [57, 59, 60, 62, 64, 65, 67],
+    [59, 60, 62, 64, 65, 67, 69],
+  ];
+  for (const ntt of [1, 3]) {
+    const policy = parseCasm(casm([ctab(10, { ntt })]), 0)[0].channels[10];
+    for (const [degree, pitches] of expected.entries()) {
+      const destination = randomHarmony('C', 1, () => degree / 7)[0];
+      assert.deepEqual([48, 50, 52, 53, 55, 57, 59].map(pitch =>
+        transposeYamaha({ pitch, yamaha: policy }, destination)), pitches, destination.name);
+    }
+  }
+});
+test('Bass and Melody convert non-C minor sources back to major and retain chromatic offsets', () => {
+  const cmaj7 = randomHarmony('C', 1, () => 0)[0];
+  for (const ntt of [1, 3]) {
+    const policy = parseCasm(casm([ctab(10, { root: 2, chord: 10, ntt })]), 0)[0].channels[10];
+    assert.deepEqual([38, 40, 41, 43, 45, 46, 48, 50].map(pitch =>
+      transposeYamaha({ pitch, yamaha: policy }, cmaj7)), [48, 50, 52, 53, 55, 57, 59, 60]);
+    const major = parseCasm(casm([ctab(10, { ntt })]), 0)[0].channels[10];
+    assert.equal(transposeYamaha({ pitch: 49, yamaha: major }, am7), 58);
+  }
+});
+test('Bass and Melody degree conversion respects Root Fixed, High Key and octave limits', () => {
+  for (const ntt of [1, 3]) {
+    const policy = parseCasm(casm([ctab(10, { ntt, ntr: 1 })]), 0)[0].channels[10];
+    assert.deepEqual([48, 52, 55, 57].map(pitch =>
+      transposeYamaha({ pitch, yamaha: policy }, am7)), [45, 48, 52, 53]);
+    const limited = parseCasm(casm([ctab(10, { ntt, highKey: 5, low: 36, high: 60 })]), 0)[0].channels[10];
+    assert.deepEqual([24, 28, 31, 33].map(pitch =>
+      transposeYamaha({ pitch, yamaha: limited }, am7)), [45, 36, 40, 41]);
+  }
+});
+test('Bass and Melody preserve authored chromatic offsets over every chord in all 12 major keys', () => {
+  for (const ntt of [1, 3]) {
+    const policy = parseCasm(casm([ctab(10, { ntt })]), 0)[0].channels[10];
+    const chromaticNotes = [
+      { pitch: 25, degree: 0 }, { pitch: 27, degree: 1 }, { pitch: 30, degree: 3 },
+      { pitch: 32, degree: 4 }, { pitch: 34, degree: 5 },
+    ];
+    for (const [tonic, key] of majorKeys.entries()) {
+      for (let degree = 0; degree < 7; degree++) {
+        const chord = randomHarmony(key, 1, () => degree / 7)[0];
+        for (const note of chromaticNotes) {
+          const expected = (tonic + majorIntervals[(degree + note.degree) % 7] + 1) % 12;
+          const actual = transposeYamaha({ pitch: note.pitch, yamaha: policy }, chord);
+          assert.equal(actual % 12, expected,
+            `${key} / ${chord.name} / ${policy.ranges[0].ntt}: chromatic ${pitchName(note.pitch)}`);
+        }
+      }
+    }
+  }
 });
 test('Root Fixed Chord keeps piano register, drums and bypass stay unchanged', () => {
   const [group] = parseCasm(casm([sectionNames('Main A'), ctab(13, { ntr: 1, ntt: 2 }), ctab(12, { ntr: 1, ntt: 1 }),
@@ -219,10 +285,82 @@ test('MIDI parser associates section-specific source-channel policies with notes
 });
 
 const rockPath = new URL('../public/styles/Pop&Rock/RocknRoll.sty', import.meta.url);
+test('RocknRoll all sections: diatonic parts stay in all 12 major keys and Bypass stays authored',
+  { skip: !existsSync(rockPath) }, async t => {
+    const bytes = readFileSync(rockPath);
+    const style = parseMidi(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length), 'RocknRoll.sty');
+    const before = structuredClone(style);
+    const sourceExercises = style.sections.map((_, section) =>
+      buildExercise(style, { section, bars: 4, trackId: '0:10', level: 4 }));
+    const allNotes = exercise => [...exercise.target, ...exercise.backing];
+    const unchangedNotes = notes => notes.map(({ pitchChanges = [], ...note }) => ({ ...note, pitchChanges }));
+    const intro = sourceExercises.find(exercise => exercise.sectionName === 'Intro C');
+    assert.ok(intro, 'The fixture must include the chromatic Bypass intro.');
+    assert.equal(allNotes(intro).filter(note => note.part !== 'drums' && note.pitch % 12 === 6).length, 10);
+    const qualities = ['maj7', 'm7', 'm7', 'maj7', '7', 'm7', 'm7b5'];
+    for (const [tonic, key] of majorKeys.entries()) {
+      await t.test(key, () => {
+        const keyPitches = majorIntervals.map(interval => (tonic + interval) % 12);
+        const bassPhrases = [];
+        let checked = 0;
+        let bypassChecked = 0;
+        for (let degree = 0; degree < 7; degree++) {
+          const chord = randomHarmony(key, 1, () => degree / 7)[0];
+          const expectedChord = [0, 2, 4, 6].map(offset =>
+            (majorIntervals[(degree + offset) % 7] - majorIntervals[degree] + 12) % 12);
+          assert.equal(chord.root, keyPitches[degree], `${key}: chord root ${degree + 1}`);
+          assert.deepEqual(chord.chordIntervals, expectedChord, `${key}: chord tones ${degree + 1}`);
+          assert.ok(chord.name.endsWith(qualities[degree]), `${key}: chord quality ${degree + 1}`);
+          for (const [section, source] of sourceExercises.entries()) {
+            const exercise = buildExercise(style, {
+              section, bars: 4, trackId: '0:10', level: 4, harmony: Array(4).fill(chord),
+            });
+            const notes = allNotes(exercise);
+            const sourceNotes = allNotes(source);
+            const context = `${key} / ${chord.name} / ${exercise.sectionName}`;
+            assert.deepEqual(exercise.chords, Array(4).fill(chord.name), context);
+            assert.equal(notes.length, sourceNotes.length, `${context}: preserve source attacks`);
+            assert.deepEqual(notes.filter(note => note.part === 'drums'),
+              sourceNotes.filter(note => note.part === 'drums'), `${context}: preserve drums`);
+            const bypass = notes.filter(note => note.part !== 'drums' && note.yamaha.ranges[0].ntt === 'Bypass');
+            assert.deepEqual(unchangedNotes(bypass),
+              unchangedNotes(sourceNotes.filter(note => note.part !== 'drums' && note.yamaha.ranges[0].ntt === 'Bypass')),
+              `${context}: preserve fixed Bypass phrases, including chromatic notes`);
+            bypassChecked += bypass.length;
+            for (const note of notes.filter(note => note.part !== 'drums' && note.yamaha.ranges[0].ntt !== 'Bypass')) {
+              const range = note.yamaha.ranges[0];
+              assert.ok(keyPitches.includes(note.pitch % 12),
+                `${context}: channel ${note.channel + 1}, tick ${note.tick}, ${range.ntt} produced ${pitchName(note.pitch)}`);
+              assert.ok(note.pitch >= range.lowLimit && note.pitch <= range.highLimit,
+                `${context}: ${pitchName(note.pitch)} outside CASM limits`);
+              for (const change of note.pitchChanges ?? []) {
+                if (change.pitch !== undefined) assert.ok(keyPitches.includes(change.pitch % 12),
+                  `${context}: sustained note changed to ${pitchName(change.pitch)}`);
+              }
+              checked++;
+            }
+            if (exercise.sectionName === 'Main A') {
+              const expectedBass = [0, 2, 4, 5].map(offset => keyPitches[(degree + offset) % 7]);
+              assert.deepEqual(exercise.target.map(note => note.pitch % 12),
+                Array(4).fill(expectedBass).flat(), `${context}: exact bass phrase degrees`);
+              bassPhrases.push(`${chord.name}: ${exercise.target.slice(0, 4).map(note => pitchName(note.pitch)).join(' ')}`);
+            }
+          }
+        }
+        assert.ok(checked > 0 && bypassChecked > 0, `${key}: exercise both transposed and Bypass parts`);
+        t.diagnostic(bassPhrases.join(' | '));
+      });
+    }
+    assert.deepEqual(style, before);
+  });
+
 test('RocknRoll Track 1 bass: Cmaj7 source and Am7 targets, backing, density and scoring agree', { skip: !existsSync(rockPath) }, () => {
   const bytes = readFileSync(rockPath);
   const style = parseMidi(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length), 'RocknRoll.sty');
   const before = structuredClone(style);
+  const bassPolicy = style.notes.find(note => note.channel === 10).yamaha;
+  assert.equal(sourceHarmony(bassPolicy).name, 'Cmaj7');
+  assert.equal(bassPolicy.ranges[0].ntt, 'Bass');
   const source = buildExercise(style, { trackId: '0:10', level: 4 });
   assert.deepEqual(source.chords, Array(4).fill('Cmaj7'));
   assert.deepEqual(source.target.map(note => note.pitch), Array(4).fill([24, 28, 31, 33]).flat());
@@ -230,7 +368,7 @@ test('RocknRoll Track 1 bass: Cmaj7 source and Am7 targets, backing, density and
   const changed = buildExercise(style, { trackId: '0:10', level: 4, harmony });
   assert.deepEqual(changed.chords, Array(4).fill('Am7'));
   assert.deepEqual(changed.target.map(note => note.pitch), Array(4).fill([33, 36, 40, 41]).flat());
-  const withoutPitch = notes => notes.map(({ pitch, ...note }) => note);
+  const withoutPitch = notes => notes.map(({ pitch, pitchChanges = [], ...note }) => ({ ...note, pitchChanges }));
   assert.deepEqual(withoutPitch(changed.target), withoutPitch(source.target));
   assert.deepEqual(changed.backing.filter(note => note.part === 'drums'), source.backing.filter(note => note.part === 'drums'));
   const otherTrack = buildExercise(style, { trackId: '0:13', level: 4, harmony });

@@ -152,10 +152,9 @@ export function transposeYamaha(note, destination, { toRoot = false } = {}) {
       [(destination.root + targetTone) % 12], lowLimit, highLimit);
   }
   const interval = (note.pitch - source.root + 12) % 12;
-  if (ntt === 'Melody') {
-    pitch = note.pitch + rootShift;
-  } else if (ntt === 'Bass') {
-    pitch = note.pitch + rootShift;
+  if (ntt === 'Melody' || ntt === 'Bass') {
+    const degree = nearestDegree(interval, source.intervals);
+    pitch = note.pitch + rootShift + destination.intervals[degree] - source.intervals[degree];
   } else if (nttAlterations.has(nttCode)) {
     pitch = note.pitch + rootShift;
     if (source.minor !== !!destination.minor) {
