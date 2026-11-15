@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createDemo } from '../src/midi.js';
+import { STYLE_PARTS, stylePartOf } from '../src/training.js';
 import {
   TROPHIES,
   buildMasteryView,
@@ -30,6 +32,53 @@ const contextFor = leaf => ({
   maxLevel: 4,
   score: 95,
   bpm: 110,
+});
+
+test('Yamaha part classification covers all eight destinations and keeps MIDI instruments distinct from style roles', () => {
+  const expected = ['rhythm', 'rhythm', 'bass', 'chord', 'chord', 'pad', 'phrase', 'phrase'];
+  expected.forEach((part, index) => {
+    const channel = index + 8;
+    const note = { channel, program: 0, bank: 0, trackName: '' };
+    assert.equal(stylePartOf(note, 'style'), part);
+    assert.equal(stylePartOf({ ...note, channel: 0, yamaha: { destination: channel } }, 'style'), part);
+  });
+  assert.equal(stylePartOf({ channel: 13, program: 0, yamaha: { destination: 11 } }, 'style'), 'chord');
+  assert.equal(stylePartOf({ channel: 14, program: 0 }, 'midi'), 'chord', 'MIDI channel 15 does not imply Phrase');
+  assert.equal(stylePartOf({ channel: 1, program: 33 }, 'midi'), 'bass');
+  assert.deepEqual([...new Set(createDemo().notes.map(note => stylePartOf(note)))].sort(), ['bass', 'chord', 'rhythm']);
+});
+
+test('all five part badges roll up playable leaves and preserve saved mastery during role enrichment', () => {
+  const state = initialMasteryState();
+  const leaves = Object.keys(STYLE_PARTS).flatMap((part, index) => [0, 1].map(sectionIndex => ({
+    sectionIndex, sectionName: `Main ${sectionIndex}`, trackId: `0:${index + 8}`,
+    trackName: 'Piano', family: part === 'rhythm' ? 'drums' : part === 'bass' ? 'bass' : 'chords',
+    styleParts: [part], maxLevel: 4,
+  })));
+  const detailed = registerStyleCatalog(state, { styleName: 'Yamaha', leaves });
+  for (const leaf of leaves.filter(leaf => leaf.sectionIndex === 0)) {
+    detailed.progress[leafKey(leaf)] = { mastered: true, highestLevel: 4 };
+  }
+  let model = buildMasteryView(state).styles[0];
+  Object.keys(STYLE_PARTS).forEach(part => {
+    assert.deepEqual(model.parts[part], { applicable: true, mastered: false, completed: 1, total: 2 });
+  });
+  for (const leaf of leaves) detailed.progress[leafKey(leaf)] = { mastered: true, highestLevel: 4 };
+  model = buildMasteryView(state).styles[0];
+  assert.ok(Object.values(model.parts).every(part => part.mastered));
+  assert.equal(model.hero, true);
+  const oldLeaf = { ...leaves[6], styleParts: undefined };
+  registerStyleCatalog(state, { styleName: 'Old Piano', leaves: [oldLeaf] });
+  state.detailedStyles['Old Piano'].progress[leafKey(oldLeaf)] = { mastered: true, highestLevel: 4 };
+  const oldCatalog = state.detailedStyles['Old Piano'].catalog[leafKey(oldLeaf)];
+  delete oldCatalog.styleParts;
+  assert.equal(buildMasteryView(state).styles.find(style => style.name === 'Old Piano').parts.chord.mastered, true);
+  registerStyleCatalog(state, { styleName: 'Old Piano', leaves: [{ ...oldLeaf, styleParts: ['pad'] }] });
+  const enriched = buildMasteryView(state).styles.find(style => style.name === 'Old Piano');
+  assert.equal(enriched.parts.pad.mastered, true);
+  assert.equal(enriched.parts.chord.applicable, false);
+  assert.equal(enriched.parts.phrase.mastered, false);
+  assert.equal(enriched.hero, true);
 });
 
 test('unlocking the top level is distinct from mastering the top level', () => {

@@ -1,3 +1,5 @@
+import { STYLE_PARTS } from './training.js';
+
 const STORAGE_KEY = 'style-trainer-mastery-v2';
 const LEGACY_STORAGE_KEY = 'style-trainer-mastery-v1';
 
@@ -181,8 +183,15 @@ const normalizeLeaf = leaf => ({
   trackId: String(leaf.trackId || ''),
   trackName: String(leaf.trackName || leaf.trackId || 'Instrument'),
   family: ['drums', 'bass', 'chords'].includes(leaf.family) ? leaf.family : 'chords',
+  styleParts: normalizedStyleParts(leaf),
   maxLevel: Math.max(1, Number(leaf.maxLevel) || 4),
 });
+
+function normalizedStyleParts(leaf) {
+  const parts = [...new Set((Array.isArray(leaf.styleParts) ? leaf.styleParts : [])
+    .filter(part => Object.hasOwn(STYLE_PARTS, part)))];
+  return parts.length ? parts : [leaf.family === 'drums' ? 'rhythm' : leaf.family === 'bass' ? 'bass' : 'chord'];
+}
 
 export function registerStyleCatalog(state, { styleName, category = 'Style', leaves = [] }) {
   if (!state || !styleName) return null;
@@ -345,8 +354,7 @@ export function recordAdvancementToMastery(state, {
   };
 }
 
-const familySummary = (tracks, family) => {
-  const matching = tracks.filter(track => track.family === family);
+const trackSummary = matching => {
   const completed = matching.filter(track => track.mastered).length;
   return {
     applicable: matching.length > 0,
@@ -355,6 +363,7 @@ const familySummary = (tracks, family) => {
     total: matching.length,
   };
 };
+const familySummary = (tracks, family) => trackSummary(tracks.filter(track => track.family === family));
 
 export function buildMasteryView(state, currentCatalog = null) {
   const detailedStyles = { ...(state?.detailedStyles || {}) };
@@ -378,6 +387,7 @@ export function buildMasteryView(state, currentCatalog = null) {
         id: leaf.trackId,
         name: leaf.trackName,
         family: leaf.family,
+        styleParts: normalizedStyleParts(leaf),
         highestLevel: progress.highestLevel || 0,
         maxLevel: leaf.maxLevel || 4,
         bestScore: progress.bestScore || 0,
@@ -418,6 +428,9 @@ export function buildMasteryView(state, currentCatalog = null) {
         bass: familySummary(allTracks, 'bass'),
         drums: familySummary(allTracks, 'drums'),
       },
+      parts: Object.fromEntries(Object.keys(STYLE_PARTS).map(part => [
+        part, trackSummary(allTracks.filter(track => track.styleParts.includes(part))),
+      ])),
     };
   }).sort((a, b) => a.name.localeCompare(b.name));
   return { styles };

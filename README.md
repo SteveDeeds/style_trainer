@@ -97,10 +97,27 @@ enable Preview synth first; if sound setup opens, repeat the selection/click
 after choosing sounds.
 
 Hi-hats use distinct notation symbols: **X** for closed hi-hat (MIDI 42),
-a **diamond below the staff** for pedal hi-hat (MIDI 44), and a **circled X**
+an **X below the staff** for pedal hi-hat (MIDI 44), and a **circled X**
 for open hi-hat (MIDI 46). A key beneath drum notation explains these symbols;
 hovering a notehead identifies its MIDI key. These display changes do not
 change the controller keys, sounds, or scoring.
+
+Drum notation covers all General MIDI percussion sounds (35–81). Kick and snare
+use oval heads; side stick/cross-stick (37) uses an X in the snare's space.
+Six toms have distinct ascending staff positions. Ride, crash, china and splash
+use X heads, while ride bell uses a diamond. Auxiliary percussion is explicitly
+labeled above the notes; unmapped kit-specific sounds show their MIDI number
+rather than an anonymous generic drum. A collapsible visual key shows only
+the sounds used in the exercise, and notehead tooltips and pad labels name them.
+Acoustic/electric versions of the same drum intentionally share its position.
+The layout follows common drum-chart conventions, not a universal standard:
+[Drumeo's notation guide](https://www.drumeo.com/beat/how-to-read-drum-music/)
+explains publisher variations and modern combined-voice notation;
+[OnlineDrummer's drum key](https://www.onlinedrummer.com/pages/drum-key)
+describes drum/cymbal positions and cross-stick technique. Extra percussion
+positions are this application's labeled convention. Existing simplified rhythm,
+controller pitches, sound selection, and scoring remain unchanged; MIDI
+velocity alone is not reinterpreted as ghost-note, rimshot, or accent technique.
 
 The **88-key piano** below the score is a display-only indicator, not a touch
 keyboard. It always shows the full A0-C8 range (MIDI 21-108). Green keys show
@@ -342,7 +359,8 @@ markers follow the engraved note spacing, including unequal rhythmic spacing.
   finishes and stops normally; automatic progression never forces looping on.
 - **Sound effects** in **Devices & audio** selects **Band leader** (default),
   **Video game**, or **None** while stopped. The preference is saved in this
-  browser. Band leader plays the spoken samples described below; Video game
+  browser. Band leader plays the spoken samples described below at 40% gain;
+  instrument, metronome, and fanfare levels are unchanged. Video game
   uses a short synthesized success cue, a longer achievement arpeggio, and
   rising/falling arpeggios for tempo changes. None mutes only these effects,
   not instruments or metronome clicks. Scoring and LEDs work in every mode.
@@ -479,7 +497,51 @@ notation. Play/Step/Record/Stop/Loop and volume remain in the fixed bottom bar.
   errors remain visible without opening it.
 - **Mastery & Trophies** opens a wide showcase with separate Style Mastery and
   Trophy Case tabs. Expanding a style reveals its sections and each playable
-  instrument track without interrupting practice.
+  instrument track without interrupting practice. While stopped, **Load style**
+  opens that style from the library or connected style folder and closes the
+  showcase without starting playback. If several sources share a name, choose
+  the source first. Unavailable files must be imported again or their folder
+  reconnected in Change style; saved mastery is retained. **Return to practice**
+  closes the showcase for the already-loaded style without resetting it.
+
+**Choose your style** opens a large workspace overlay, leaving transport Stop
+available. Search by style/folder name; sort by name, tempo, meter, difficulty,
+or folder. Folder, tempo-band, meter, and difficulty buttons toggle filters:
+no selection means all; multiple selections within a group are OR, and groups
+combine with AND. Tempo buttons show BPM ranges (Largo <60, Adagio 60–75,
+Andante 76–107, Moderato 108–119, Allegro 120–167, Presto 168+); these are
+non-overlapping browsing bands, not authoritative performance markings.
+Styles with multiple tempos/meters match any of their section values.
+**Recent** restricts results to the last 10 styles loaded for practice, remembered
+across visits. Previewing does not count. Recent combines with the other filters;
+Clear filters turns it off. Same-named styles in different folders remain distinct.
+Unreadable styles are excluded from playable search results and listed with
+their error under **Excluded styles**. Original files are never deleted.
+The browser rates library and folder entries locally when opened.
+Selecting a style reveals its overall, section, grouped-part, and playable-track
+difficulty. Section and Track selectors also show ratings; tracks silent in the
+selected section are omitted, and entirely silent sections are disabled.
+Ratings describe the full-density source pattern, not a reduced practice level
+or speed. Easy means eighth-note attacks or slower, Medium means sixteenths,
+and Hard means thirty-seconds or faster. MIDI note duration does not affect
+the rating. Performance offsets within 1/32 of a quarter note are grouped as
+one attack; small timing deviations and eighth/sixteenth triplet spacing are
+recognized rather than mistaken for thirty-second runs. A harder spacing is
+recurring when it appears at least three times and in at least 35% of a track's
+onset gaps (or all gaps in a short repeating loop); rarer harder attacks appear as a
+separate fills label. Loop-boundary spacing counts too. Simultaneous notes count
+as one attack; a single-note loop is rated by its repeating loop interval.
+Different tracks are never merged to calculate spacing.
+Sections use their hardest playable track. The overall rating uses Main-section
+grooves when available, with harder fills/introductions/endings separate;
+ordinary MIDI without Main sections uses all sections. Original tempo,
+attacks per second, offbeat entries, triplet/swing spacing, simultaneous notes,
+pitch range, and octave jumps provide context without changing the rating.
+Analysis persists in IndexedDB under a versioned content checksum plus filename,
+so changed files or rating rules do not reuse stale analysis. Source bytes are
+read to verify checksums on a new visit, but unchanged analysis is not recomputed.
+Folder handles also check file size/modification time while the chooser is open.
+Storage failures are reported and fall back to session-only analysis.
 
 Setup drawers are non-modal so Stop remains available. Close with their close
 button or Escape; focus returns to the opener. Harmony also supports Escape
@@ -494,8 +556,13 @@ Detailed mastery follows the same hierarchy used for practice:
 **style → section → instrument track**. Completing the top density level through
 an eligible full-pattern, normal-tempo advancement earns that instrument's
 badge in that section. A section badge requires every playable instrument in
-the section. The Bass and Drums indicators require every playable track in
-that family across the style; an absent family is shown as not applicable.
+the section. Five grouped badges cover Yamaha's eight parts: **Rhythm** (1/2),
+**Bass**, **Chord** (1/2), **Pad**, and **Phrase** (1/2). Each requires every
+playable section/track assigned to that group; absent groups show N/A.
+Yamaha CASM destination assignments take precedence over standard style
+channels 9–16. Ordinary MIDI and the demo use Rhythm, Bass, and Chord based
+on the existing instrument classification. Older saved catalogs retain their
+completion and refresh their Yamaha assignments when the style is loaded.
 Silent section/track combinations never block an award.
 
 The style header shows completed parts over total playable parts. Mastering
@@ -536,7 +603,11 @@ GM channel 10 and Yamaha percussion bank MSBs 126/127 identify drums; GM bass
 programs 33–40 (one-based), or a track
 name containing "bass", identify bass. Other pitched tracks are harmonic parts.
 All levels are cumulative filters of the actual source notes, not generated
-practice patterns. Within each bar, notes are ranked by musical priority and
+practice patterns. Drums use instrument/pulse filters, never forced note-count
+quotas: entire kick and snare/cross-stick patterns remain intact, Level 3 adds
+only hi-hats on the pulse, and Level 4 adds offbeat hats and all other percussion.
+Adjacent drum levels may legitimately match if the source lacks the added part.
+For pitched parts, within each bar, notes are ranked by musical priority and
 distance from the beat. Levels keep strictly nested prefixes of that ranking:
 a non-empty bar exposes at least one note at Level 1, two when available at
 Level 2, three when available at Level 3, and every source note at Level 4.
@@ -548,7 +619,7 @@ section/exercise boundaries).
 |---|---|---|
 | 1 | All kicks (33/35/36), on or off the beat | Root notes on the main beats |
 | 2 | Add snares and side stick (31/37/38/40), on or off the beat | Add root notes off the beat |
-| 3 | Add hi-hats (GM 42/44/46) | Add other notes on the main beats |
+| 3 | Add on-pulse hi-hats (GM 42/44/46) | Add other notes on the main beats |
 | 4 | Everything else, including snare rolls, rimshots, cymbals, toms and fills | All remaining source notes |
 
 These categories affect training density and staff placement only. Playback
@@ -556,6 +627,10 @@ keeps each source MIDI pitch, kit program and velocity; side stick 37 is not
 remapped to snare 38, and soft kick 33 is not remapped to kick 36.
 
 In 4/4, main beats are the four quarter-note beats. Other meters use the
+time-signature denominator's beat unit, except Level 3 drum hats in compound
+6/8, 9/8 and 12/8: these use dotted-quarter pulses. Drum pulse tolerance is 6%
+of the pulse, allowing small performance timing offsets.
+For pitched parts, other meters use the
 time-signature denominator's beat unit. Onsets within 6% of that unit are treated
 as on-beat to accommodate humanized MIDI; they are never moved onto the grid.
 Roots match by pitch class in any octave. Yamaha parts use their authored CASM

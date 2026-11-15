@@ -37,6 +37,9 @@ export const forgetStyleFolder = () => storedFolder('readwrite', store => store.
 export const readLastStyle = () => storedFolder('readonly', store => store.get('last-style'));
 export const saveLastStyle = style => storedFolder('readwrite', store => store.put(style, 'last-style'));
 export const forgetLastStyle = () => storedFolder('readwrite', store => store.delete('last-style'));
+export const readStyleAnalysis = key => storedFolder('readonly', store => store.get(`analysis:${key}`));
+export const saveStyleAnalysis = (key, analysis) => storedFolder('readwrite', store => store.put(analysis, `analysis:${key}`));
+export const forgetStyleAnalysis = key => storedFolder('readwrite', store => store.delete(`analysis:${key}`));
 
 export async function folderPermission(handle, request = false) {
   const options = { mode: 'read' };
@@ -80,7 +83,7 @@ export async function readStyleEntry(entry, fetcher = fetch) {
   if (entry.handle || entry.file) {
     const file = entry.file ?? await entry.handle.getFile();
     if (file.size > 32 * 1024 * 1024) throw new Error(`Style is larger than 32 MiB: ${file.name}`);
-    return { buffer: await file.arrayBuffer(), name: file.name };
+    return { buffer: await file.arrayBuffer(), name: file.name, revision: `${file.size}:${file.lastModified}` };
   }
   const response = await fetcher(entry.url);
   if (!response.ok) throw new Error(`Style could not be loaded (HTTP ${response.status}): ${entry.name}`);

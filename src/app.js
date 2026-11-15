@@ -1,15 +1,18 @@
 import './style.css';
 import { createDemo, parseMidi } from './midi.js';
-import { buildExercise, buildStylePreview, inferChord, initialHarmony, LAYERS, masteryFanfarePitches, medianTimingOffset, partOf, pitchName, practiceExercise, Progression, QUALIFYING_SCORE, randomHarmony, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
+import { buildExercise, buildStylePreview, inferChord, initialHarmony, LAYERS, masteryFanfarePitches, medianTimingOffset, partOf, pitchName, practiceExercise, Progression, QUALIFYING_SCORE, randomHarmony, STYLE_PARTS, stylePartOf, styleTracks, targetGroupAt, TIMING_TOLERANCE_MS, trackIdOf } from './training.js';
 import { AudioEngine, monitorNote, SFX_TYPES } from './audio.js';
 import { MidiController } from './controller.js';
 import { Notation } from './notation.js';
 import { PianoKeyboard, pianoTargets } from './piano.js';
 import { Transport } from './transport.js';
 import { sourceHarmony } from './yamaha.js';
+import { drumNotation } from './drum-notation.js';
+import { analyzeDifficulty, DIFFICULTY_VERSION, difficultyLabel } from './difficulty.js';
+import { filterStyleRows, readRecentStyles, rememberRecentStyle, styleEntryKey, TEMPO_BANDS } from './style-browser.js';
 import { assetUrl } from './assets.js';
 import { clearSavedSounds, downloadSounds, readSavedSounds, saveSounds, validateStarter } from './soundfont-cache.js';
-import { folderPermission, forgetStyleFolder, readLastStyle, readStyleEntry, readStyleFolder, saveLastStyle, saveStyleFolder, scanStyleFolder, stylesFromFiles } from './style-folder.js';
+import { folderPermission, forgetStyleFolder, readLastStyle, readStyleAnalysis, readStyleEntry, readStyleFolder, saveLastStyle, saveStyleAnalysis, saveStyleFolder, scanStyleFolder, stylesFromFiles } from './style-folder.js';
 import { buildMasteryView, leafProgress, loadMastery, qualifiesForDetailedMastery, recordAdvancementToMastery, recordLoopToMastery, registerStyleCatalog, saveMastery, TROPHIES } from './mastery.js';
 
 const icons = {
@@ -28,7 +31,7 @@ document.querySelector('#app').innerHTML = `
   </header>
   <main>
     <section class="style-strip" aria-label="Exercise settings">
-      <div class="style-title"><h2 id="style-name"></h2><label>Section <select id="section" aria-label="Style section"></select></label></div>
+      <div class="style-title"><h2 id="style-name"></h2><span id="style-difficulty" class="difficulty-label"></span><label>Section <select id="section" aria-label="Style section"></select></label></div>
       <label class="focus-label">Track <select id="focus" aria-label="Practice track"></select></label>
       <div class="metric"><span id="key-label" class="field-label">KEY SIGNATURE</span><strong id="key"></strong><span id="meter" class="metric-sub"></span></div>
       <label class="metric"><span class="field-label">BASE TEMPO</span><span class="tempo-input"><input id="bpm" type="number" min="30" max="240" value="96" aria-label="Tempo in BPM"><small>BPM</small></span></label>
@@ -42,6 +45,7 @@ document.querySelector('#app').innerHTML = `
       <button id="open-harmony" class="small-button" popovertarget="harmony-popover" aria-controls="harmony-popover">Chord progression: Original</button>
       <label><input id="show-keys" type="checkbox" aria-controls="keys-panel"> On-screen keys</label>
     </section>
+    <p id="track-difficulty" class="difficulty-explanation"></p>
     <section class="workspace">
       <section class="density-panel" aria-label="Difficulty progression">
         <div class="density-heading"><span class="level-badge" id="level-badge">LEVEL 1 / 4</span><strong id="density-name"></strong></div>
@@ -73,8 +77,26 @@ document.querySelector('#app').innerHTML = `
     <div class="dialog-heading"><h2 id="style-dialog-title">Choose your style</h2><button data-close="style-dialog" aria-label="Close style library">×</button></div>
     <p class="drawer-notice" data-notice role="status"></p>
     <p>Select a style to hear a four-bar C - G - Am - F preview with all parts. Load it when you are ready to practice. Importing a style or restoring the demo also previews it.</p>
-    <label>Style library <select id="library-style" aria-label="Local style"><option value="">Choose a local style…</option></select></label>
+    <div class="style-browser-tools">
+      <label>Search styles<input id="style-search" type="search" placeholder="Style or folder name"></label>
+      <label>Sort by<select id="style-sort"><option value="name">Name</option><option value="tempo">Tempo</option><option value="meter">Meter</option><option value="difficulty">Difficulty</option><option value="folder">Folder</option></select></label>
+      <button id="style-reset-filters" class="small-button">Clear filters</button>
+      <button id="style-recent" class="small-button filter-button" aria-pressed="false" title="Last 10 styles loaded for practice">Recent</button>
+    </div>
+    <div class="style-browser-filters">
+      <fieldset><legend>Folders</legend><div id="style-folder-filters" class="filter-buttons"></div></fieldset>
+      <fieldset><legend>Tempo bands (BPM)</legend><div id="style-tempo-filters" class="filter-buttons"></div></fieldset>
+      <fieldset><legend>Meter</legend><div id="style-meter-filters" class="filter-buttons"></div></fieldset>
+      <fieldset><legend>Difficulty</legend><div id="style-level-filters" class="filter-buttons"></div></fieldset>
+    </div>
+    <p class="style-filter-hint">No buttons selected means all. Selected buttons combine within each group; different filter groups must all match. Tempo names are browsing ranges, not strict musical definitions.</p>
+    <p id="style-result-count" role="status"></p>
+    <div id="style-results" class="style-results" aria-label="Style results"></div>
+    <label class="legacy-style-select">Style library <select id="library-style" aria-label="Local style"><option value="">Choose a local style…</option></select></label>
     <button id="load-style" class="small-button" disabled>Load style</button>
+    <p id="difficulty-status" role="status"></p>
+    <details id="style-excluded" hidden><summary>Excluded styles</summary><ul id="style-excluded-list"></ul></details>
+    <div id="library-difficulty" class="difficulty-breakdown"></div>
     <div class="drawer-actions"><button id="open-style-folder" class="small-button">Open style folder</button><button id="restore-style-folder" class="small-button" hidden>Open remembered folder</button><button id="forget-style-folder" class="small-button" hidden>Forget folder</button><input id="style-folder-files" type="file" webkitdirectory multiple hidden></div>
     <p id="folder-status" role="status">Choose an extracted style collection. Files stay on your device; supported folders can be remembered in this browser.</p>
     <p id="library-status">Loading local library…</p>
@@ -151,7 +173,9 @@ document.querySelector('#app').innerHTML = `
   <dialog id="help-dialog"><div class="dialog-heading"><h2>Find your groove.</h2><button id="close-help" aria-label="Close practice guide">×</button></div>
     <p><b>Play</b> loops the target arrangement and lights MIDI notes. <b>Step</b> freezes at each target onset until you play the pitches. Hold melodic shapes together; drum hits can be tapped in sequence. <b>Record</b> gives a one-bar count-in, mutes your target part, and scores each loop.</p>
     <p>Timing accuracy uses musical subdivision tolerances: <b>green</b> notes within <b>±1/32 note</b> receive full credit; <b>blue</b> notes within <b>±1/16 note</b> receive half credit. Notes worse than ±1/16 note receive no credit and count as extra notes. Wrong pitches count against you. Score <b>${QUALIFYING_SCORE}% or higher on three recorded loops</b> to advance to the next level or increase speed. They do not need to be consecutive; lower scores keep your earned qualifying loops. Each qualifying pattern of four bars or more lights a progress LED and plays "huh" or "yeah". The third lights all three LEDs and plays a longer phrase, "let's go" or "yeah like that", before progress resets at the next speed or density. Perfect scores also count toward stars and crowns in your Trophy Case.</p>
-    <p><b>Mastery & Trophies</b> opens a wide showcase with separate Style Mastery and Trophy Case tabs. Expand a style to see section badges and every playable instrument. Master all Bass or Drums tracks for its family indicator; master every playable section/instrument combination for the Style Hero reward. Silent combinations do not count, and returning to a track resumes its saved density. Older aggregate scores remain labeled as legacy history rather than being assigned to an instrument.</p>
+    <p><b>Mastery & Trophies</b> opens a wide showcase with separate Style Mastery and Trophy Case tabs. Expand a style to see section badges and every playable instrument. Master all playable parts in each group for its Rhythm, Bass, Chord, Pad or Phrase badge; master every playable section/instrument combination for the Style Hero reward. Absent groups show N/A. Silent combinations do not count, and returning to a track resumes its saved density. Older aggregate scores remain labeled as legacy history rather than being assigned to an instrument.</p>
+    <p><b>Style difficulty</b> describes recurring note attacks at full source density: Easy is eighth notes or slower, Medium is sixteenths, and Hard is thirty-seconds or faster. Shorter MIDI note durations do not make a pattern harder. Occasional harder attacks are labeled as fills. Choose your style shows sections, part groups and tracks with original tempo and coordination details. Silent tracks are hidden from the practice selector.</p>
+    <p><b>Browsing styles</b> opens a large workspace overlay with search, sorting, and folder, tempo-band, meter and difficulty filter buttons. No buttons selected means all; multiple buttons in a group match either choice. Ratings describe recurring Main-section grooves, grouping small performance offsets and recognizing triplets. Harder fills are separate. Analysis is cached locally and refreshed when source bytes or rating rules change. Broken sources are excluded, with errors listed separately; original files are untouched.</p>
     <p><b>Range</b> lets you drill any individual bar. At full-pattern settings and the original base BPM, <b>Speed</b> advances through 50% → 75% → 100% after three loops each scoring ${QUALIFYING_SCORE}% or higher, not necessarily in a row. Recording continues: "pick it up" or "come on" signals a tempo increase at a loop boundary. An average below 60% over the last three loops slows one step (125% → 100% → 75% → 50%) with a "drop" or "lay back" sample, keeping your density level. At 100%, three qualifying loops pass the density level without a tempo-change cue. Mastering level 4 saves its checkmark, plays an in-key trumpet-style fanfare (unless SFX is None), and moves to 125% bonus speed without stopping. You can also select 125% at any level without unlocking it; speed never automatically exceeds 125%. Changing tempo or density starts a fresh qualifying-loop count. Single-bar drills, 25%/90% speeds and a lowered base BPM remain practice-only. Loop off still finishes one pass and stops.</p>
     <p>The score emphasizes <b>note attacks</b>: short release rests can become a longer note, with a staccato dot for clearly short articulation. Meaningful rests remain. Ties are reserved for beat/bar boundaries; no automatic tenuto or legato is inferred. Audio and scoring retain source timing.</p>
     <p><b>Change style</b> opens the local library, import and demo controls. <b>Devices & audio</b> contains MIDI ports, SoundFont loading, Preview synth, click sound and diagnostics. <b>Chord progression</b> offers key selection, randomization and restore. Enable <b>On-screen keys</b> for playable pads; MIDI works with them hidden. Click a level indicator while stopped to inspect any density.</p>
@@ -524,26 +548,53 @@ function rebuild() {
     pad.classList.toggle('held', inputNotes.has(Number(pad.dataset.pitch)));
   }
   updateProgress();
+  const rating = currentDifficulty.sections[Number($('section').value)].tracks.find(track => track.id === $('focus').value);
+  $('track-difficulty').textContent = `Track: ${difficultyLabel(rating)} · ${rating.details.join(' · ')} · Full-density source pattern`;
 }
-function setStyle(next, { remember = true } = {}) {
+function setStyle(next, { remember = true, source = null } = {}) {
   stopAudition();
+  const difficulty = parsedDifficulties.get(next) ??
+    (next.difficultyAnalysis?.version === DIFFICULTY_VERSION ? next.difficultyAnalysis.profile : analyzeDifficulty(next));
+  const firstPlayable = difficulty.sections.find(section => section.tracks.length);
+  if (!firstPlayable) throw new Error('This style has no playable notes in its sections.');
   style = next;
-  $('section').replaceChildren(...style.sections.map((s, i) => new Option(s.name, i)));
+  currentDifficulty = difficulty;
+  $('style-difficulty').textContent = difficultyLabel(difficulty);
+  $('style-difficulty').title = 'Recurring groove at source density; harder fills shown separately.';
+  if ($('style-dialog').open) renderDifficultyBreakdown(difficulty, next.name);
+  $('section').replaceChildren(...style.sections.map((s, i) => {
+    const option = new Option(`${s.name} · ${difficultyLabel(difficulty.sections[i])}`, i);
+    option.disabled = !difficulty.sections[i].tracks.length;
+    return option;
+  }));
+  $('section').value = String(firstPlayable.index);
   updateTracks('');
   currentMasteryCatalog = masteryCatalog(style);
   randomizedHarmony = initialHarmony(style, Number($('bars').value));
   $('harmony-key').value = randomizedHarmony ? 'C' :
     style.key === 'Unknown' ? (sourcePolicy() ? sourceHarmony(sourcePolicy()).key : 'C') : style.key;
-  const start = style.sections[0].start;
+  const start = style.sections[firstPlayable.index].start;
   $('bpm').value = Math.round(style.tempos.filter(t => t.tick <= start).at(-1)?.bpm ?? 120);
   $('practice-bar').value = '';
   $('practice-speed').value = '100';
   updatePracticeBars();
   resetProgress();
   rebuild();
+  if ($('mastery-dialog').open) renderMasteryDialog();
   if (remember) {
+    const key = source ? styleEntryKey(source) : next.styleBrowserKey ??
+      styleEntryKey({ name: next.name, category: next.demo ? 'Demo Style' : 'Imported Style' });
+    next.styleBrowserKey = key;
+    const updated = [key, ...recentStyles.filter(previous => previous !== key)].slice(0, 10);
+    try { recentStyles = rememberRecentStyle(recentStyles, key); }
+    catch (error) {
+      recentStyles = updated;
+      reportError(new Error(`Style loaded, but recent history could not be saved: ${error.message}`));
+    }
+    if ($('style-dialog').open) refreshStyleBrowser();
     styleSelection++;
     const snapshot = structuredClone(next);
+    snapshot.difficultyAnalysis = { version: DIFFICULTY_VERSION, profile: difficulty };
     lastStyleSave = lastStyleSave.then(() => saveLastStyle(snapshot)).catch(error => {
       console.warn(error);
       notify(`Style is loaded, but could not be remembered for next visit: ${error.message}`, true);
@@ -566,13 +617,10 @@ async function restoreLastPracticeStyle() {
   }
 }
 function updateTracks(preferred = $('focus').value) {
-  const section = style.sections[Number($('section').value)];
-  const active = new Set(style.notes.filter(note => note.tick >= section.start && note.tick < section.end)
-    .map(note => `${note.track}:${note.channel}`));
-  const tracks = styleTracks(style);
-  $('focus').replaceChildren(...tracks.map(track => new Option(`${track.name}${active.has(track.id) ? '' : ' — silent in this section'}`, track.id)));
-  $('focus').value = tracks.find(track => track.id === preferred && active.has(track.id))?.id ??
-    tracks.find(track => active.has(track.id))?.id ?? tracks[0].id;
+  const section = currentDifficulty.sections[Number($('section').value)];
+  const tracks = section.tracks;
+  $('focus').replaceChildren(...tracks.map(track => new Option(`${track.name} · ${difficultyLabel(track)}`, track.id)));
+  $('focus').value = tracks.find(track => track.id === preferred)?.id ?? tracks[0]?.id ?? '';
 }
 function trackLayers() {
   const track = styleTracks(style).find(track => track.id === $('focus').value);
@@ -583,15 +631,16 @@ function trackLayers() {
 function masteryCatalog(source) {
   const tracks = styleTracks(source);
   const leaves = source.sections.flatMap((section, sectionIndex) => {
-    const active = new Set(source.notes
-      .filter(note => note.tick >= section.start && note.tick < section.end)
-      .map(trackIdOf));
+    const sectionNotes = source.notes.filter(note => note.tick >= section.start && note.tick < section.end);
+    const active = new Set(sectionNotes.map(trackIdOf));
     return tracks.filter(track => active.has(track.id)).map(track => ({
       sectionIndex,
       sectionName: section.name,
       trackId: track.id,
       trackName: track.name,
       family: track.part,
+      styleParts: [...new Set(sectionNotes.filter(note => trackIdOf(note) === track.id)
+        .map(note => stylePartOf(note, source.sourceType)))],
       maxLevel: LAYERS[track.part].length,
     }));
   });
@@ -725,7 +774,17 @@ function updateTransport() {
   $('restore-chords').disabled = busy || mode !== 'stop' || randomizedHarmony === null;
   $('transport-caption').textContent = { stop: 'Start with a little listening.', play: 'Get to know the groove.', step: 'Take it one shape at a time.', record: 'You have the lead now.' }[mode];
   for (const id of ['focus', 'bars', 'section', 'bpm', 'style-file', 'demo', 'sf-file', 'preview', 'practice-bar', 'practice-speed', 'library-style', 'load-local-font', 'click', 'click-sound', 'sfx-type', 'harmony-key', 'randomize-chords', 'open-style-folder', 'restore-style-folder', 'forget-style-folder', 'style-folder-files']) $(id).disabled = busy || mode !== 'stop';
-  $('load-style').disabled = busy || mode !== 'stop' || !$('library-style').value;
+  $('load-style').disabled = busy || mode !== 'stop' || !$('library-style').value ||
+    Boolean(entryDifficulties.get(styleEntries[Number($('library-style').value)])?.error);
+  for (const button of document.querySelectorAll('.mastery-load-style')) {
+    button.disabled = busy || mode !== 'stop' || button.dataset.available !== 'true';
+  }
+  for (const select of document.querySelectorAll('.mastery-style-actions select')) {
+    select.disabled = busy || mode !== 'stop';
+  }
+  for (const button of document.querySelectorAll('.style-result')) {
+    button.disabled = busy || mode !== 'stop' || button.dataset.ready !== 'true';
+  }
   $('test-led').disabled = busy || mode !== 'stop';
   $('connect-midi').disabled = busy;
   $('midi-input').disabled = busy;
@@ -769,9 +828,9 @@ function updatePads() {
     const button = document.createElement('button');
     button.className = 'note-pad';
     button.dataset.pitch = pitch;
-    button.setAttribute('aria-label', `Play ${pitchName(pitch)}, MIDI note ${pitch}`);
     const drum = group.notes.some(n => n.pitch === pitch && n.part === 'drums');
-    const drumName = { 35: 'Kick', 36: 'Kick', 38: 'Snare', 40: 'Snare', 42: 'Hi-hat', 44: 'Hi-hat', 46: 'Open hat' }[pitch];
+    const drumName = drum ? drumNotation(pitch).name : null;
+    button.setAttribute('aria-label', `Play ${drumName ?? pitchName(pitch)}, MIDI note ${pitch}`);
     button.innerHTML = `<b>${drum ? drumName ?? 'Drum' : pitchName(pitch)}</b><small>MIDI ${pitch}</small><kbd>${shortcuts[i] ?? '·'}</kbd>`;
     button.addEventListener('pointerdown', e => {
       e.preventDefault();
@@ -1040,7 +1099,7 @@ function resumePendingMode() {
 }
 
 function renderStyleLibrary() {
-  styleEntries = [...library.styles.map(entry => ({ ...entry, url: assetUrl(entry.url) })), ...folderEntries];
+  styleEntries = [...library.styles, ...folderEntries];
   const groups = new Map();
   styleEntries.forEach((entry, index) => {
     if (!groups.has(entry.category)) {
@@ -1048,13 +1107,276 @@ function renderStyleLibrary() {
       group.label = entry.category;
       groups.set(entry.category, group);
     }
-    groups.get(entry.category).append(new Option(entry.name, String(index)));
+    const cached = entryDifficulties.get(entry);
+    const option = new Option(`${entry.name} · ${cached?.profile ? difficultyLabel(cached.profile) : 'Rating pending'}`, String(index));
+    option.dataset.styleName = entry.name;
+    groups.get(entry.category).append(option);
   });
   $('library-style').replaceChildren(new Option('Choose a style…', ''), ...groups.values());
   $('library-style').closest('label').hidden = styleEntries.length === 0;
+  $('library-style').closest('label').classList.add('legacy-style-select');
   $('load-style').hidden = styleEntries.length === 0;
+  if ($('mastery-dialog').open) renderMasteryDialog();
+  $('library-difficulty').replaceChildren();
+  refreshStyleBrowser();
+  updateTransport();
+  if ($('style-dialog').open) void rateStyleLibrary();
   updateTransport();
 }
+
+const entryDifficulties = new WeakMap();
+const parsedDifficulties = new WeakMap();
+let difficultyRequest = 0;
+let currentDifficulty;
+let cacheWarning = false;
+
+async function analyzeStyleEntry(entry) {
+  let cached = entryDifficulties.get(entry);
+  if (!cached) {
+    cached = {};
+    entryDifficulties.set(entry, cached);
+  }
+  if (cached.profile) {
+    if (!entry.handle) return cached;
+    const file = await entry.handle.getFile();
+    if (cached.revision === `${file.size}:${file.lastModified}`) return cached;
+  }
+  if (cached.pending) return cached.pending;
+  cached.pending = (async () => {
+    const data = await readStyleEntry(entry);
+    await difficultyForData(data, cached);
+    cached.error = null;
+    return cached;
+  })();
+  try { return await cached.pending; }
+  finally { cached.pending = null; }
+}
+
+function reportAnalysisCacheError(error) {
+  console.warn('Style difficulty cache unavailable:', error);
+  if (!cacheWarning) {
+    cacheWarning = true;
+    notify(`Difficulty works for this visit but could not be cached: ${error.message}`, true);
+  }
+}
+
+async function readParsedStyle(entry) {
+  let cached = entryDifficulties.get(entry);
+  if (!cached) { cached = {}; entryDifficulties.set(entry, cached); }
+  try {
+    const data = await readStyleEntry(entry);
+    const next = parseMidi(data.buffer, data.name);
+    const profile = await difficultyForData(data, cached, next);
+    parsedDifficulties.set(next, profile);
+    return next;
+  } catch (error) {
+    cached.error = error;
+    cached.profile = null;
+    refreshStyleBrowser();
+    if ($('mastery-dialog').open) renderMasteryDialog();
+    throw error;
+  }
+}
+
+async function difficultyForData(data, cached, parsed) {
+  const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', data.buffer))]
+    .map(byte => byte.toString(16).padStart(2, '0')).join('');
+  const key = `${DIFFICULTY_VERSION}:${hash}:${data.name}`;
+  if (cached.key === key && cached.profile) {
+    cached.revision = data.revision;
+    return cached.profile;
+  }
+  let profile;
+  try { profile = await readStyleAnalysis(key); }
+  catch (error) { reportAnalysisCacheError(error); }
+  if (!profile) {
+    const next = parsed ?? parseMidi(data.buffer, data.name);
+    buildExercise(next);
+    profile = analyzeDifficulty(next);
+    try { await saveStyleAnalysis(key, profile); }
+    catch (error) { reportAnalysisCacheError(error); }
+  }
+  cached.profile = profile;
+  cached.revision = data.revision;
+  cached.key = key;
+  cached.error = null;
+  return profile;
+}
+
+function renderDifficultyBreakdown(profile, name) {
+  const heading = document.createElement('h3');
+  heading.textContent = `${name} · ${difficultyLabel(profile)}`;
+  const explanation = document.createElement('p');
+  explanation.textContent = 'Recurring Main-section groove at full source density, with harder fills separate. Tiny performance offsets are grouped; swing/triplets use their musical subdivision. Tempo and coordination provide context, not extra difficulty points.';
+  const sections = profile.sections.map(section => {
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = `${section.name} · ${difficultyLabel(section)}`;
+    details.append(summary);
+    const parts = document.createElement('p');
+    parts.textContent = Object.entries(STYLE_PARTS).filter(([part]) => section.parts[part].level !== null)
+      .map(([part, label]) => `${label}: ${difficultyLabel(section.parts[part])}`).join(' · ') || 'No playable notes in this section.';
+    details.append(parts);
+    for (const track of section.tracks) {
+      const row = document.createElement('div');
+      row.className = 'difficulty-track';
+      const title = document.createElement('strong');
+      title.textContent = `${track.name} · ${difficultyLabel(track)}`;
+      const context = document.createElement('span');
+      context.textContent = `${track.parts.map(part => STYLE_PARTS[part]).join(' / ')} · ${track.details.join(' · ')}`;
+      row.append(title, context);
+      details.append(row);
+    }
+    return details;
+  });
+  $('library-difficulty').replaceChildren(heading, explanation, ...sections);
+}
+
+async function rateStyleLibrary() {
+  const request = ++difficultyRequest;
+  const entries = [...styleEntries];
+  const jobs = entries.map((entry, index) => ({ entry, index }))
+    .sort((a, b) => Number(Boolean(b.entry.file || b.entry.handle)) - Number(Boolean(a.entry.file || a.entry.handle)));
+  const options = new Map([...$('library-style').options].map(option => [option.value, option]));
+  let cursor = 0;
+  let completed = 0;
+  let failed = 0;
+  let lastRender = 0;
+  const work = async () => {
+    while (cursor < entries.length && request === difficultyRequest && $('style-dialog').open) {
+      const { entry, index } = jobs[cursor++];
+      try {
+        await analyzeStyleEntry(entry);
+      } catch (error) {
+        console.warn(`Difficulty unavailable for ${entry.name}:`, error);
+        entryDifficulties.get(entry).error = error;
+        entryDifficulties.get(entry).profile = null;
+      }
+      if (request !== difficultyRequest) return;
+      const cached = entryDifficulties.get(entry);
+      const option = options.get(String(index));
+      if (option) {
+        option.textContent = `${entry.name} · ${cached.profile ? difficultyLabel(cached.profile) : 'Difficulty unavailable'}`;
+        option.title = cached.error?.message || 'Full-density source rhythm';
+        option.disabled = Boolean(cached.error);
+      }
+      if (cached.error) failed++;
+      completed++;
+      $('difficulty-status').textContent = `Ready ${completed - failed} / ${entries.length} styles. Analysis cached locally.${failed ? ` ${failed} sources could not be rated; select one for its error details.` : ''}${cacheWarning ? ' Persistent cache unavailable; using session ratings.' : ''}`;
+      if (performance.now() - lastRender >= 120) {
+        refreshStyleBrowser();
+        lastRender = performance.now();
+      }
+      if ($('library-style').value === String(index) && cached.profile) renderDifficultyBreakdown(cached.profile, entry.name);
+    }
+  };
+  $('difficulty-status').textContent = entries.length ? 'Reading styles locally to calculate difficulty…' : 'Import a style or folder to see difficulty ratings.';
+  await Promise.all([work(), work()]);
+  if (request === difficultyRequest) {
+    refreshStyleBrowser();
+    updateTransport();
+  }
+}
+
+const styleFilters = {
+  folders: new Set(), tempos: new Set(), meters: new Set(), difficulties: new Set(),
+};
+let recentStyles = [];
+try { recentStyles = readRecentStyles(); }
+catch (error) { reportError(new Error(`Could not restore recent styles: ${error.message}`)); }
+let recentOnly = false;
+
+function renderFilterButtons(id, options, selected) {
+  const container = $(id);
+  const focused = container.contains(document.activeElement) ? document.activeElement.dataset.value : null;
+  container.replaceChildren(...options.map(({ value, label }) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'small-button filter-button';
+    button.dataset.value = value;
+    button.textContent = label;
+    button.setAttribute('aria-pressed', String(selected.has(value)));
+    button.addEventListener('click', () => {
+      if (selected.has(value)) selected.delete(value);
+      else selected.add(value);
+      refreshStyleBrowser();
+    });
+    return button;
+  }));
+  if (focused) [...container.children].find(button => button.dataset.value === focused)?.focus();
+}
+
+function refreshStyleBrowser() {
+  const rows = styleEntries.map((entry, index) => ({ entry, index, ...entryDifficulties.get(entry) }));
+  const folders = [...new Set(rows.map(row => row.entry.category))].sort();
+  const meters = [...new Set(rows.flatMap(row => row.profile?.meters || []))].sort();
+  for (const folder of styleFilters.folders) if (!folders.includes(folder)) styleFilters.folders.delete(folder);
+  renderFilterButtons('style-folder-filters', folders.map(value => ({ value, label: value })), styleFilters.folders);
+  renderFilterButtons('style-tempo-filters', TEMPO_BANDS.map(band => ({
+    value: band.id, label: `${band.label} · ${band.min === 0 ? '<60' : band.max === Infinity ? `${band.min}+` : `${band.min}-${band.max}`} BPM`,
+  })), styleFilters.tempos);
+  renderFilterButtons('style-meter-filters', meters.map(value => ({ value, label: value })), styleFilters.meters);
+  renderFilterButtons('style-level-filters', [
+    { value: '0', label: 'Easy' }, { value: '1', label: 'Medium' }, { value: '2', label: 'Hard' },
+    { value: 'pending', label: 'Unrated / unavailable' },
+  ], styleFilters.difficulties);
+  const excluded = rows.filter(row => row.error);
+  $('style-excluded').hidden = excluded.length === 0;
+  $('style-excluded-list').replaceChildren(...excluded.map(row => {
+    const item = document.createElement('li');
+    item.textContent = `${row.entry.category} / ${row.entry.name}: ${row.error.message}`;
+    return item;
+  }));
+  const available = rows.filter(row => !row.error);
+  const visible = filterStyleRows(available, {
+    ...styleFilters, search: $('style-search').value, sort: $('style-sort').value,
+    recentOnly, recent: recentStyles,
+  });
+  $('style-result-count').textContent = `${visible.length} of ${available.length} styles${excluded.length ? ` · ${excluded.length} broken sources excluded` : ''}`;
+  const results = $('style-results');
+  const focused = results.contains(document.activeElement) ? document.activeElement.dataset.index : null;
+  results.replaceChildren(...visible.map(row => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'style-result';
+    button.dataset.index = String(row.index);
+    button.setAttribute('aria-pressed', String($('library-style').value === String(row.index)));
+    button.dataset.ready = String(Boolean(row.profile));
+    button.disabled = busy || transport.mode !== 'stop' || !row.profile;
+    const title = document.createElement('strong');
+    title.textContent = row.entry.name;
+    const meta = document.createElement('span');
+    meta.textContent = `${row.entry.category} · ${row.profile ? difficultyLabel(row.profile) : row.error ? 'Difficulty unavailable' : 'Rating pending'} · ${row.profile?.bpms?.join(' / ') || '—'} BPM · ${row.profile?.meters?.join(' / ') || '—'}`;
+    button.append(title, meta);
+    button.addEventListener('click', () => {
+      $('library-style').value = String(row.index);
+      $('library-style').dispatchEvent(new Event('change'));
+      refreshStyleBrowser();
+    });
+    return button;
+  }));
+  if (!visible.length) {
+    const empty = document.createElement('p');
+    empty.textContent = 'No styles match these filters. Clear filters or import another folder.';
+    results.append(empty);
+  }
+  if (focused) [...results.children].find(button => button.dataset.index === focused)?.focus();
+}
+
+$('style-search').addEventListener('input', refreshStyleBrowser);
+$('style-sort').addEventListener('change', refreshStyleBrowser);
+$('style-reset-filters').addEventListener('click', () => {
+  Object.values(styleFilters).forEach(selected => selected.clear());
+  $('style-search').value = '';
+  recentOnly = false;
+  $('style-recent').setAttribute('aria-pressed', 'false');
+  refreshStyleBrowser();
+});
+$('style-recent').addEventListener('click', () => {
+  recentOnly = !recentOnly;
+  $('style-recent').setAttribute('aria-pressed', String(recentOnly));
+  refreshStyleBrowser();
+});
 
 async function useStyleFolder(handle, remember) {
   const entries = await scanStyleFolder(handle);
@@ -1181,7 +1503,7 @@ async function loadLibrary() {
       throw new Error('Invalid starter SoundFont catalog.');
     }
     catalog.soundfonts.forEach(font => assetUrl(font.url));
-    catalog.styles.forEach(entry => assetUrl(entry.url));
+    catalog.styles = catalog.styles.map(entry => ({ ...entry, url: assetUrl(entry.url) }));
     library = catalog;
     renderStyleLibrary();
     if (library.soundfonts.length) localFontUrl = library.soundfonts[0].url;
@@ -1415,29 +1737,41 @@ $('demo').addEventListener('click', () => {
 $('library-style').addEventListener('change', async () => {
   stopAudition();
   updateTransport();
+  $('library-difficulty').replaceChildren();
   if (!$('library-style').value) return;
   const request = auditionRequest;
   const entry = styleEntries[Number($('library-style').value)];
   try {
-    const data = await readStyleEntry(entry);
-    const next = parseMidi(data.buffer, data.name);
-    if (request === auditionRequest) await auditionStyle(next, request);
-  } catch (error) { if (request === auditionRequest) reportError(error); }
+    const cached = entryDifficulties.get(entry);
+    if (cached?.profile) renderDifficultyBreakdown(cached.profile, entry.name);
+    const next = await readParsedStyle(entry);
+    if (request === auditionRequest) {
+      renderDifficultyBreakdown(entryDifficulties.get(entry).profile, entry.name);
+      await auditionStyle(next, request);
+    }
+  } catch (error) {
+    if (request === auditionRequest) {
+      $('library-difficulty').textContent = `Difficulty unavailable for ${entry.name}: ${error.message}`;
+      reportError(error);
+    }
+  }
 });
-$('load-style').addEventListener('click', async () => {
-  const entry = styleEntries[Number($('library-style').value)];
+async function loadLibraryStyle(entry) {
   if (!entry || busy || transport.mode !== 'stop') return;
   stopAudition();
   busy = true;
   updateTransport();
   try {
-    const data = await readStyleEntry(entry);
-    const next = parseMidi(data.buffer, data.name);
+    const next = await readParsedStyle(entry);
     buildExercise(next);
-    setStyle(next);
+    setStyle(next, { source: entry });
+    if ($('mastery-dialog').open) $('mastery-dialog').close();
     notify(`Loaded ${entry.category} / ${entry.name}. ${next.sourceType === 'style' ? 'A random C-major chord progression was selected.' : 'Using chords from the MIDI arrangement.'} Select a practice track and section.`);
   } catch (error) { reportError(error); }
   finally { busy = false; updateTransport(); }
+}
+$('load-style').addEventListener('click', () => {
+  if ($('library-style').value) void loadLibraryStyle(styleEntries[Number($('library-style').value)]);
 });
 $('load-local-font').addEventListener('click', async () => {
   if (busy || transport.mode !== 'stop') return;
@@ -1610,11 +1944,17 @@ for (const [triggerId, dialogId] of [['open-style', 'style-dialog'], ['open-devi
     }
     releaseInputs();
     dialog.show();
+    if (dialogId === 'style-dialog') {
+      refreshStyleBrowser();
+      if (!$('library-style').value) renderDifficultyBreakdown(currentDifficulty, style.name);
+      void rateStyleLibrary();
+    }
     trigger.setAttribute('aria-expanded', 'true');
     dialog.querySelector('[data-close]').focus();
   });
   dialog.addEventListener('close', () => {
-    if (dialogId === 'style-dialog') stopAudition();
+    if (dialog.open) return;
+    if (dialogId === 'style-dialog') { difficultyRequest++; stopAudition(); }
     if (dialogId === 'devices-dialog') pendingMode = null;
     trigger.setAttribute('aria-expanded', 'false');
     if (!document.querySelector('.setup-drawer[open]') && !$('harmony-popover').matches(':popover-open')) trigger.focus();
@@ -1742,7 +2082,7 @@ function renderMasteryTrack(track) {
   const title = document.createElement('strong');
   title.textContent = track.name;
   const meta = document.createElement('span');
-  meta.textContent = `${track.family === 'chords' ? 'Harmony' : track.family[0].toUpperCase() + track.family.slice(1)}${track.bestScore ? ` · Best ${track.bestScore}%${track.bestBpm ? ` @ ${track.bestBpm} BPM` : ''}` : ''}`;
+  meta.textContent = `${track.styleParts.map(part => STYLE_PARTS[part]).join(' / ')}${track.bestScore ? ` · Best ${track.bestScore}%${track.bestBpm ? ` @ ${track.bestBpm} BPM` : ''}` : ''}`;
   identity.append(title, meta);
   const status = track.mastered ? masteryPill('✓ Mastered', 'complete') :
     masteryPill(track.highestLevel ? `Level ${track.highestLevel} / ${track.maxLevel}` : 'Not started');
@@ -1795,12 +2135,63 @@ function renderMasteryStyle(model) {
 
   const body = document.createElement('div');
   body.className = 'mastery-style-body';
+  const actions = document.createElement('div');
+  actions.className = 'mastery-style-actions';
+  const current = model.name === style.name;
+  const demo = model.category === 'Demo Style' && model.name === createDemo().name;
+  const entries = styleEntries.filter(entry => entry.name === model.name && !entryDifficulties.get(entry)?.error);
+  let selected = entries.length === 1 ? entries[0] : null;
+  const load = document.createElement('button');
+  load.type = 'button';
+  load.className = 'small-button mastery-load-style';
+  load.textContent = current ? 'Return to practice' : 'Load style';
+  load.setAttribute('aria-label', `${load.textContent}: ${model.name}`);
+  if (!current && entries.length > 1) {
+    const source = document.createElement('select');
+    source.disabled = busy || transport.mode !== 'stop';
+    source.setAttribute('aria-label', `Source for ${model.name}`);
+    source.append(new Option('Choose a source…', ''), ...entries.map((entry, index) =>
+      new Option(`${entry.category} · ${entry.relativePath || entry.url || entry.name}`, String(index))));
+    const matches = entries.filter(entry => entry.category === model.category);
+    if (matches.length === 1) {
+      selected = matches[0];
+      source.value = String(entries.indexOf(selected));
+    }
+    source.addEventListener('change', () => {
+      selected = source.value === '' ? null : entries[Number(source.value)];
+      load.dataset.available = String(Boolean(selected));
+      updateTransport();
+    });
+    actions.append(source);
+  }
+  load.dataset.available = String(current || demo || Boolean(selected));
+  load.disabled = busy || transport.mode !== 'stop' || load.dataset.available !== 'true';
+  load.addEventListener('click', () => {
+    if (busy || transport.mode !== 'stop') return;
+    if (current) {
+      $('mastery-dialog').close();
+    } else if (selected) {
+      void loadLibraryStyle(selected);
+    } else if (demo) {
+      try {
+        setStyle(createDemo());
+        $('mastery-dialog').close();
+        notify('Demo style restored. Select a practice track and section.');
+      } catch (error) { reportError(error); }
+    }
+  });
+  actions.append(load);
+  if (!current && !demo && !entries.length) {
+    const unavailable = document.createElement('span');
+    unavailable.className = 'mastery-source-status';
+    unavailable.textContent = 'Source unavailable. Import this style or reconnect its folder in Change style.';
+    load.title = unavailable.textContent;
+    actions.append(unavailable);
+  }
+  body.append(actions);
   const familyRow = document.createElement('div');
   familyRow.className = 'mastery-family-row';
-  familyRow.append(
-    familyPill('Bass', model.families.bass),
-    familyPill('Drums', model.families.drums),
-  );
+  familyRow.append(...Object.entries(STYLE_PARTS).map(([part, label]) => familyPill(label, model.parts[part])));
   body.append(familyRow);
   if (model.legacy) {
     const legacy = document.createElement('p');

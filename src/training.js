@@ -1,6 +1,6 @@
 export const LAYERS = {
   full: ['Kicks + on-beat roots', 'Add snares + off-beat roots', 'Add hi-hats + other on-beat notes', 'All source notes'],
-  drums: ['All kick notes', 'Add all snare notes', 'Add all hi-hat notes', 'All percussion + fills'],
+  drums: ['All kick notes', 'Add all snare / cross-stick notes', 'Add on-beat hi-hat notes', 'Add offbeat hi-hats + all percussion / fills'],
   bass: ['Root notes on the main beats', 'Add root notes off the beat', 'Add other notes on the main beats', 'All source bass notes'],
   chords: ['Chord roots on the main beats', 'Add chord roots off the beat', 'Add other chord notes on the main beats', 'All source chord notes'],
 };
@@ -12,6 +12,23 @@ export const partOf = n => n.yamaha?.destination === 8 || n.yamaha?.destination 
   (n.program >= 32 && n.program <= 39) || /bass/i.test(n.trackName) ? 'bass' : 'chords';
 
 export const trackIdOf = note => `${note.track}:${note.channel}`;
+
+export const STYLE_PARTS = {
+  rhythm: 'Rhythm', bass: 'Bass', chord: 'Chord', pad: 'Pad', phrase: 'Phrase',
+};
+const destinationParts = {
+  8: 'rhythm', 9: 'rhythm', 10: 'bass', 11: 'chord', 12: 'chord',
+  13: 'pad', 14: 'phrase', 15: 'phrase',
+};
+export function stylePartOf(note, sourceType) {
+  const destination = note.yamaha?.destination;
+  if (Object.hasOwn(destinationParts, destination)) return destinationParts[destination];
+  if (sourceType === 'style' && Object.hasOwn(destinationParts, note.channel)) {
+    return destinationParts[note.channel];
+  }
+  const family = partOf(note);
+  return family === 'drums' ? 'rhythm' : family === 'bass' ? 'bass' : 'chord';
+}
 
 export function styleTracks(style) {
   const tracks = new Map();
@@ -118,11 +135,15 @@ export function barLevelQuotas(barNotes, ppq, denominator) {
   return [k1, k2, k3, k4];
 }
 
-function drumLayer(n, level) {
+function drumLayer(n, level, ppq, meter) {
   if (level === 4) return true;
   if ([33, 35, 36].includes(n.pitch)) return true;
   if (level >= 2 && [31, 37, 38, 40].includes(n.pitch)) return true;
-  return level >= 3 && [42, 44, 46].includes(n.pitch);
+  const compound = meter.denominator === 8 && meter.numerator > 3 && meter.numerator % 3 === 0;
+  const pulseTicks = ppq * 4 / meter.denominator * (compound ? 3 : 1);
+  const pulse = n.tick / pulseTicks;
+  const onPulse = Math.abs(pulse - Math.round(pulse)) < .06;
+  return level >= 3 && [42, 44, 46].includes(n.pitch) && onPulse;
 }
 
 function pitchedLayer(note, level, root, ppq, denominator) {
@@ -293,7 +314,9 @@ export function buildExercise(style, { section = 0, bars = 4, focus = 'full', le
     if (level === 4) {
       target.push(...candidates);
     } else {
-      const candidatesWithTier = candidates.map(note => {
+      target.push(...candidates.filter(note => note.part === 'drums' &&
+        drumLayer(note, level, style.ppq, meter)));
+      const candidatesWithTier = candidates.filter(note => note.part !== 'drums').map(note => {
         const root = changes.filter(change => change.tick <= note.tick).at(-1)?.chord.root ?? note.yamaha?.sourceRoot ?? fallbackRoot;
         return { ...note, tier: noteTier(note, root, style.ppq, meter.denominator) };
       });

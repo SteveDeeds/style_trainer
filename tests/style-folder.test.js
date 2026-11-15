@@ -45,10 +45,10 @@ test('permission prompts happen only on explicit restore and request read-only a
 
 test('entries read selected local files without fetch and reject missing or oversized files', async () => {
   const buffer = new ArrayBuffer(10);
-  const local = { name: 'Test.sty', size: 10, async arrayBuffer() { return buffer; } };
+  const local = { name: 'Test.sty', size: 10, lastModified: 123, async arrayBuffer() { return buffer; } };
   const noFetch = () => { throw new Error('Local styles must not be fetched or uploaded'); };
-  assert.deepEqual(await readStyleEntry({ handle: { getFile: async () => local } }, noFetch), { name: 'Test.sty', buffer });
-  assert.deepEqual(await readStyleEntry({ file: local }, noFetch), { name: 'Test.sty', buffer });
+  assert.deepEqual(await readStyleEntry({ handle: { getFile: async () => local } }, noFetch), { name: 'Test.sty', buffer, revision: '10:123' });
+  assert.deepEqual(await readStyleEntry({ file: local }, noFetch), { name: 'Test.sty', buffer, revision: '10:123' });
   await assert.rejects(readStyleEntry({ file: { ...local, size: 33 * 1024 * 1024 } }, noFetch), /32 MiB/);
   await assert.rejects(readStyleEntry({ handle: { getFile: async () => { throw new Error('Permission revoked'); } } }, noFetch), /Permission revoked/);
 });

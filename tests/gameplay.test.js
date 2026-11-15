@@ -281,7 +281,17 @@ test('loop off still stops after scoring even when a tempo change is queued', ()
 test('encouragement uses the correct sample groups, avoids repeats, and respects Stop and loop boundaries', () => {
   const audio = new AudioEngine();
   const sources = [];
+  const gains = [];
   audio.context = {
+    createGain: () => {
+      const gain = {
+        gain: { value: 1 },
+        connect(output) { this.output = output; },
+        disconnect() { this.disconnected = true; },
+      };
+      gains.push(gain);
+      return gain;
+    },
     createBufferSource: () => {
       const source = {
         connect(gain) { this.output = gain; }, disconnect() { this.disconnected = true; },
@@ -302,7 +312,9 @@ test('encouragement uses the correct sample groups, avoids repeats, and respects
       const source = sources.at(-1);
       assert.ok(ENCOURAGEMENT_SAMPLES[kind].includes(source.buffer));
       assert.notEqual(source.buffer, previous);
-      assert.equal(source.output, audio.gain);
+      assert.equal(source.output, gains.at(-1));
+      assert.equal(source.output.gain.value, .4, 'all band-leader cues use 40% gain');
+      assert.equal(source.output.output, audio.gain, 'speech still follows master volume');
       assert.equal(source.started, true);
       assert.equal(audio.celebrationVoices.size, 1, 'speech never overlaps');
       if (sources.length > 1) assert.equal(sources.at(-2).stopped, true);
@@ -316,6 +328,7 @@ test('encouragement uses the correct sample groups, avoids repeats, and respects
   assert.equal(sources.at(-1).stopped, true);
   sources.forEach(source => source.onended());
   assert.ok(sources.every(source => source.disconnected));
+  assert.ok(gains.every(gain => gain.disconnected));
   assert.throws(() => audio.tempoChange('sideways'), /up or down/);
   assert.throws(() => audio.encourage('unknown'), /up, down, qualifying or advance/);
   assert.throws(() => new AudioEngine().encourage('up'), /Load encouragement/);

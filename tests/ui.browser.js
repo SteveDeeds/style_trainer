@@ -1,13 +1,16 @@
 import { Notation } from '../src/notation.js';
-import { createDemo } from '../src/midi.js';
+import { createDemo, parseMidi } from '../src/midi.js';
+import { initialMasteryState, leafKey, registerStyleCatalog, saveMastery } from '../src/mastery.js';
+import { analyzeDifficulty, DIFFICULTY_VERSION } from '../src/difficulty.js';
+import { DRUM_NOTATION, drumNotation } from '../src/drum-notation.js';
 import { buildExercise, masteryFanfarePitches, styleTracks } from '../src/training.js';
 import { clearSavedSounds, readSavedSounds, saveSounds, validateStarter } from '../src/soundfont-cache.js';
 import { AudioEngine } from '../src/audio.js';
-import { ENCOURAGEMENT_SAMPLES } from '../src/assets.js';
+import { assetUrl, ENCOURAGEMENT_SAMPLES } from '../src/assets.js';
 import { Transport } from '../src/transport.js';
 import { MidiController } from '../src/controller.js';
 import { PianoKeyboard } from '../src/piano.js';
-import { forgetLastStyle, forgetStyleFolder, readLastStyle, readStyleFolder, saveLastStyle, saveStyleFolder } from '../src/style-folder.js';
+import { forgetLastStyle, forgetStyleAnalysis, forgetStyleFolder, readLastStyle, readStyleFolder, saveLastStyle, saveStyleAnalysis, saveStyleFolder } from '../src/style-folder.js';
 
 export async function verifyMidiInputAudio({ expectSetup = false, blocked = false } = {}) {
   const $ = id => document.getElementById(id);
@@ -476,6 +479,377 @@ export async function verifyEarlyLoopHit({ close = false } = {}) {
   }
 }
 
+const masteryLoadingMidi = new Uint8Array([
+  77, 84, 104, 100, 0, 0, 0, 6, 0, 0, 0, 1, 1, 224,
+  77, 84, 114, 107, 0, 0, 0, 13,
+  0, 144, 60, 100, 131, 96, 128, 60, 0, 0, 255, 47, 0,
+]);
+
+// Seed an isolated browser profile, then reload before running the loading checks.
+export async function prepareMasteryStyleLoading() {
+  const fixture = parseMidi(masteryLoadingMidi.buffer, 'MasteryLoad.mid');
+  const track = styleTracks(fixture)[0];
+  const leaf = {
+    sectionIndex: 0, sectionName: fixture.sections[0].name,
+    trackId: track.id, trackName: track.name, family: track.part, maxLevel: 4,
+  };
+  const state = initialMasteryState();
+  const detailed = registerStyleCatalog(state, { styleName: fixture.name, leaves: [leaf] });
+  detailed.progress[leafKey(leaf)] = { highestLevel: 3, bestScore: 95, bestBpm: 120 };
+  for (const name of ['MasteryLoad', 'Shared', 'MissingSource', 'Broken']) {
+    state.styles[name] = { bestScore: 95 };
+  }
+  state.styles[createDemo().name] = { category: 'Demo Style', bestScore: 95 };
+  const response = await fetch(assetUrl('library.json'));
+  if (!response.ok) throw new Error(`Could not read the test style library (HTTP ${response.status}).`);
+  const builtin = (await response.json()).styles[0];
+  if (builtin) state.styles[builtin.name] = { category: builtin.category, bestScore: 95 };
+  if (!saveMastery(state)) throw new Error('Could not seed mastery loading tests.');
+  await saveLastStyle(createDemo());
+}
+
+export async function verifyMasteryStyleLoading() {
+  const $ = id => document.getElementById(id);
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(`Mastery loading: ${message}`);
+    checks.push(message);
+  };
+  const until = async predicate => {
+    const limit = performance.now() + 5000;
+    while (!predicate()) {
+      if (performance.now() > limit) throw new Error('Mastery loading check timed out.');
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  };
+  const card = name => {
+    const item = [...$('mastery-styles-list').children]
+      .find(item => item.querySelector('.style-item-title').firstChild.textContent === name);
+    if (!item) throw new Error(`Mastery style is missing: ${name}`);
+    item.open = true;
+    return item;
+  };
+  const button = name => card(name).querySelector('.mastery-load-style');
+  const builtinName = $('library-style').options[1]?.dataset.styleName;
+  const files = new DataTransfer();
+  for (const path of ['MasteryLoad.mid', 'A/Shared.mid', 'B/Shared.mid', 'Broken.mid']) {
+    const file = new File([path === 'Broken.mid' ? new Uint8Array([0]) : masteryLoadingMidi], path.split('/').at(-1));
+    Object.defineProperty(file, 'webkitRelativePath', { value: path });
+    files.items.add(file);
+  }
+  const originalFiles = [...files.files];
+  $('style-folder-files').files = files.files;
+  $('style-folder-files').dispatchEvent(new Event('change'));
+  await until(() => $('folder-status').textContent.includes('session only'));
+  $('open-mastery').click();
+  check(button('MissingSource').disabled && card('MissingSource').textContent.includes('Source unavailable'), 'Missing files are explicitly unavailable');
+  const choice = card('Shared').querySelector('select');
+  check(choice.options.length === 3 && choice.value === '' && button('Shared').disabled, 'Duplicate names require an explicit source choice');
+  choice.value = '1';
+  choice.dispatchEvent(new Event('change'));
+  check(!button('Shared').disabled, 'Choosing a duplicate source enables loading');
+
+  const getFile = File.prototype.arrayBuffer;
+  let release;
+  File.prototype.arrayBuffer = function() {
+    if (this.name !== 'MasteryLoad.mid') return getFile.call(this);
+    return new Promise(resolve => { release = () => resolve(getFile.call(this)); });
+  };
+  try {
+    button('MasteryLoad').click();
+    check($('mastery-dialog').open && button('MasteryLoad').disabled && button('Shared').disabled && choice.disabled, 'Loading keeps the showcase open and gates all style actions');
+    check($('style-name').textContent === 'Midnight Pocket', 'Pending loading preserves the existing exercise');
+    release();
+    await until(() => !$('mastery-dialog').open);
+  } finally { File.prototype.arrayBuffer = getFile; }
+  check($('style-name').textContent === 'MasteryLoad', 'Style Mastery loads the selected file');
+  check($('stop').getAttribute('aria-pressed') === 'true', 'Style loading does not start playback');
+  check($('level-badge').textContent.startsWith('LEVEL 3'), 'Loading resumes saved density progress');
+  await until(() => !$('open-style-folder').disabled);
+  const savedLimit = performance.now() + 5000;
+  while ((await readLastStyle())?.name !== 'MasteryLoad') {
+    if (performance.now() > savedLimit) throw new Error('Loaded style was not remembered.');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  check((await readLastStyle()).name === 'MasteryLoad', 'Loaded styles are remembered for the next visit');
+  $('open-mastery').click();
+  const notation = $('notation').querySelector('svg').getAttribute('aria-label');
+  button('MasteryLoad').click();
+  check(!$('mastery-dialog').open && $('notation').querySelector('svg').getAttribute('aria-label') === notation, 'Returning to the current style does not rebuild or reset it');
+  $('open-mastery').click();
+  button('Broken').click();
+  await until(() => $('notice').getAttribute('role') === 'alert' && !$('open-style-folder').disabled);
+  check($('mastery-dialog').open && $('style-name').textContent === 'MasteryLoad', 'Failed loading reports the error and preserves the current style and showcase');
+  check(button('Broken').disabled, 'Broken sources are excluded from further mastery loading');
+  const shared = card('Shared').querySelector('select');
+  shared.value = '1';
+  shared.dispatchEvent(new Event('change'));
+  button('Shared').click();
+  await until(() => !$('mastery-dialog').open);
+  check($('style-name').textContent === 'Shared', 'The explicitly chosen duplicate source loads');
+  $('open-mastery').click();
+  button('Midnight Pocket').click();
+  check($('style-name').textContent === 'Midnight Pocket' && !$('mastery-dialog').open, 'The built-in demo can be restored from mastery without a file');
+  if (builtinName) {
+    $('open-mastery').click();
+    button(builtinName).click();
+    await until(() => !$('mastery-dialog').open);
+    check($('style-name').textContent === builtinName && $('stop').getAttribute('aria-pressed') === 'true', 'Published library styles load directly from mastery without autoplay');
+    $('open-mastery').click();
+    button('Midnight Pocket').click();
+  }
+  $('preview').checked = true;
+  $('preview').dispatchEvent(new Event('change'));
+  $('play').click();
+  await until(() => $('play').getAttribute('aria-pressed') === 'true');
+  $('open-mastery').click();
+  check([...document.querySelectorAll('.mastery-load-style')].every(control => control.disabled) &&
+    card('Shared').querySelector('select').disabled, 'Playback gates mastery loading and source selection');
+  $('stop').click();
+  check(!button('MasteryLoad').disabled && !card('Shared').querySelector('select').disabled, 'Stopping re-enables available styles without reopening the showcase');
+  const replacement = new DataTransfer();
+  replacement.items.add(new File([masteryLoadingMidi], 'Replacement.mid'));
+  $('style-folder-files').files = replacement.files;
+  $('style-folder-files').dispatchEvent(new Event('change'));
+  await until(() => button('MasteryLoad').disabled);
+  check(card('MasteryLoad').textContent.includes('Source unavailable'), 'Losing a source refreshes an already-open showcase');
+  const reconnected = new DataTransfer();
+  originalFiles.forEach(file => reconnected.items.add(file));
+  $('style-folder-files').files = reconnected.files;
+  $('style-folder-files').dispatchEvent(new Event('change'));
+  await until(() => !button('MasteryLoad').disabled);
+  check(!card('Shared').querySelector('select').disabled, 'Reconnecting sources refreshes loading actions in the open showcase');
+  $('mastery-dialog').close();
+  return checks;
+}
+
+function browserStyleBytes(bpm, numerator) {
+  const microseconds = Math.round(60000000 / bpm);
+  const body = [
+    0, 255, 81, 3, microseconds >> 16 & 255, microseconds >> 8 & 255, microseconds & 255,
+    0, 255, 88, 4, numerator, 2, 24, 8,
+    ...masteryLoadingMidi.slice(22),
+  ];
+  return new Uint8Array([...masteryLoadingMidi.slice(0, 18), 0, 0, 0, body.length, ...body]);
+}
+
+export async function prepareStyleBrowserCache() {
+  const bytes = browserStyleBytes(70, 4);
+  const profile = analyzeDifficulty(parseMidi(bytes.buffer, 'Cached Ballad.mid'));
+  profile.sections[0].tracks[0].details.push('Persistent cache reused');
+  const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.buffer))]
+    .map(byte => byte.toString(16).padStart(2, '0')).join('');
+  await saveStyleAnalysis(`${DIFFICULTY_VERSION}:${hash}:Cached Ballad.mid`, profile);
+  const oldBytes = browserStyleBytes(100, 4);
+  const oldHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', oldBytes.buffer))]
+    .map(byte => byte.toString(16).padStart(2, '0')).join('');
+  const stale = analyzeDifficulty(parseMidi(oldBytes.buffer, 'Walking Groove.mid'));
+  stale.sections[0].tracks[0].details.push('Obsolete rating version');
+  await saveStyleAnalysis(`${DIFFICULTY_VERSION - 1}:${oldHash}:Walking Groove.mid`, stale);
+  await saveLastStyle(createDemo());
+}
+
+export async function cleanupStyleBrowserCache() {
+  for (const [bpm, name, version] of [
+    [70, 'Cached Ballad.mid', DIFFICULTY_VERSION],
+    [100, 'Walking Groove.mid', DIFFICULTY_VERSION - 1],
+  ]) {
+    const bytes = browserStyleBytes(bpm, 4);
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.buffer))]
+      .map(byte => byte.toString(16).padStart(2, '0')).join('');
+    await forgetStyleAnalysis(`${version}:${hash}:${name}`);
+  }
+}
+
+export async function verifyStyleBrowserCache() {
+  const $ = id => document.getElementById(id);
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(`Style browser: ${message}`);
+    checks.push(message);
+  };
+  const until = async predicate => {
+    const limit = performance.now() + 10000;
+    while (!predicate()) {
+      if (performance.now() > limit) throw new Error('Style browser check timed out.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  const files = new DataTransfer();
+  const add = (name, bpm, meter, path) => {
+    const file = new File([browserStyleBytes(bpm, meter)], name);
+    Object.defineProperty(file, 'webkitRelativePath', { value: path });
+    files.items.add(file);
+  };
+  add('Cached Ballad.mid', 70, 4, 'Pop/Cached Ballad.mid');
+  add('Quick Waltz.mid', 140, 3, 'Jazz/Quick Waltz.mid');
+  add('Walking Groove.mid', 100, 4, 'Jazz/Walking Groove.mid');
+  $('preview').checked = true;
+  $('preview').dispatchEvent(new Event('change'));
+  $('open-style').click();
+  $('style-folder-files').files = files.files;
+  $('style-folder-files').dispatchEvent(new Event('change'));
+  await until(() => [...$('style-results').children].some(row =>
+    row.textContent.includes('Cached Ballad') && row.dataset.ready === 'true'));
+  await until(() => [...$('style-results').children].some(row =>
+    row.textContent.includes('Walking Groove') && row.dataset.ready === 'true'));
+  const search = value => {
+    $('style-search').value = value;
+    $('style-search').dispatchEvent(new Event('input'));
+  };
+  search('cached ballad');
+  check($('style-results').children.length === 1, 'Search matches style names');
+  $('style-results').children[0].click();
+  await until(() => $('library-difficulty').textContent.includes('Persistent cache reused'));
+  check(true, 'Versioned analysis from a previous visit is reused rather than recalculated');
+  const toggle = (id, value) => [...$(id).children].find(button => button.dataset.value === value).click();
+  search('');
+  toggle('style-folder-filters', 'Folder · Jazz');
+  check($('style-results').children.length === 2, 'Folder buttons filter results');
+  toggle('style-tempo-filters', 'andante');
+  check($('style-results').children.length === 1 && $('style-results').textContent.includes('Walking Groove'), 'Folder and tempo filters combine');
+  toggle('style-tempo-filters', 'allegro');
+  check($('style-results').children.length === 2, 'Multiple tempo toggles match either range');
+  toggle('style-meter-filters', '3/4');
+  check($('style-results').children.length === 1 && $('style-results').textContent.includes('Quick Waltz'), 'Meter filters use source metadata');
+  toggle('style-level-filters', '2');
+  check($('style-results').textContent.includes('No styles match'), 'Difficulty filters show an explicit empty result');
+  $('style-reset-filters').click();
+  search('folder jazz');
+  $('style-sort').value = 'tempo';
+  $('style-sort').dispatchEvent(new Event('change'));
+  check($('style-results').children[0].textContent.includes('Walking Groove'), 'Tempo sorting uses numeric BPM');
+  $('style-results').children[0].click();
+  await until(() => $('library-difficulty').querySelector('h3')?.textContent.includes('Walking Groove'));
+  check(!$('library-difficulty').textContent.includes('Obsolete rating version'), 'Changed rating rules ignore older cache versions');
+  check([...$('style-tempo-filters').children].every(button => button.textContent.includes('BPM')), 'Tempo buttons display their numeric bands');
+  const bounds = $('style-dialog').getBoundingClientRect();
+  check(bounds.width > Math.min(innerWidth - 40, 700) && !$('stop').closest('[inert]'), 'Expanded chooser covers the workspace without making Stop inert');
+  $('style-dialog').close();
+  $('open-style').click();
+  search('cached ballad');
+  $('style-results').children[0].click();
+  await until(() => $('library-difficulty').textContent.includes('Persistent cache reused'));
+  check(true, 'Reopening the chooser keeps cached ratings');
+  const changed = new DataTransfer();
+  const file = new File([browserStyleBytes(100, 4)], 'Cached Ballad.mid');
+  Object.defineProperty(file, 'webkitRelativePath', { value: 'Pop/Cached Ballad.mid' });
+  changed.items.add(file);
+  $('style-folder-files').files = changed.files;
+  $('style-folder-files').dispatchEvent(new Event('change'));
+  await until(() => $('style-results').children[0]?.dataset.ready === 'true' &&
+    $('style-results').children[0].textContent.includes('100 BPM'));
+  $('style-results').children[0].click();
+  await until(() => $('library-difficulty').querySelector('h3')?.textContent.includes('Cached Ballad'));
+  check(!$('library-difficulty').textContent.includes('Persistent cache reused'), 'Changing source bytes invalidates a previous analysis cache');
+  $('style-reset-filters').click();
+  search('cached ballad');
+  $('style-results').children[0].click();
+  await until(() => !$('load-style').disabled);
+  const previousRecent = localStorage.getItem('style-trainer-recent-styles-v1');
+  $('style-recent').click();
+  check($('style-recent').getAttribute('aria-pressed') === 'true' &&
+    localStorage.getItem('style-trainer-recent-styles-v1') === previousRecent,
+  'Recent is a toggle and previewing does not modify load history');
+  $('style-recent').click();
+  $('load-style').click();
+  await until(() => $('style-name').textContent === 'Cached Ballad' && !$('open-style-folder').disabled);
+  $('style-recent').click();
+  check($('style-results').textContent.includes('Cached Ballad') && $('style-result-count').textContent.startsWith('1 of'),
+    'Loading a style adds it to Recent and combines with search');
+  check(JSON.parse(localStorage.getItem('style-trainer-recent-styles-v1')).some(key => key.includes('Cached Ballad')),
+    'Recent load history is persisted');
+  $('style-reset-filters').click();
+  check($('style-recent').getAttribute('aria-pressed') === 'false', 'Clear filters resets Recent');
+  $('style-dialog').close();
+  return checks;
+}
+
+export async function prepareDifficultyUI() {
+  const style = createDemo();
+  style.name = 'Difficulty UI';
+  style.sections = [
+    { name: 'Main Easy', start: 0, end: 1920 },
+    { name: 'Main Medium', start: 1920, end: 3840 },
+    { name: 'Silent', start: 3840, end: 5760 },
+  ];
+  style.notes = [];
+  const add = (start, gap, channel, program) => {
+    for (let tick = start; tick < start + 1920; tick += gap) {
+      style.notes.push({ tick, pitch: channel === 9 ? 36 : 60, duration: 1,
+        channel, track: channel, trackName: '', program, bank: 0, velocity: 90 });
+    }
+  };
+  add(0, 240, 1, 33);
+  add(0, 240, 2, 0);
+  add(1920, 120, 2, 0);
+  add(1920, 240, 9, 0);
+  style.maxTick = 5760;
+  await saveLastStyle(style);
+}
+
+export async function verifyDifficultyUI() {
+  const $ = id => document.getElementById(id);
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(`Difficulty UI: ${message}`);
+    checks.push(message);
+  };
+  const until = async predicate => {
+    const limit = performance.now() + 10000;
+    while (!predicate()) {
+      if (performance.now() > limit) throw new Error('Difficulty UI check timed out.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  const change = (id, value) => {
+    $(id).value = value;
+    $(id).dispatchEvent(new Event('change'));
+  };
+  check($('style-difficulty').textContent === 'Medium', 'Overall style uses the hardest section');
+  check($('section').options[0].textContent.includes('Easy') &&
+    $('section').options[1].textContent.includes('Medium'), 'Section selector shows section difficulty');
+  check($('section').options[2].disabled && $('section').options[2].textContent.includes('N/A'), 'Entirely silent sections are explicit and disabled');
+  check($('focus').options.length === 2 && ![...$('focus').options].some(option => option.textContent.includes('Drums') || option.textContent.includes('silent')), 'Silent tracks are omitted rather than tagged');
+  change('focus', '2:2');
+  change('section', '1');
+  check($('focus').value === '2:2', 'Section changes preserve a still-playable track');
+  check($('focus').options.length === 2 && ![...$('focus').options].some(option => option.textContent.includes('Bass')), 'New section hides the previously playable bass');
+  check($('track-difficulty').textContent.includes('Medium') && $('track-difficulty').textContent.includes('96 BPM'), 'Track difficulty includes original-tempo context');
+  change('section', '0');
+  change('focus', '1:1');
+  change('section', '1');
+  check($('focus').value === '2:2', 'A track that becomes silent falls back to a playable track');
+  change('practice-speed', '50');
+  check($('style-difficulty').textContent === 'Medium' && $('focus').selectedOptions[0].textContent.includes('Medium'), 'Practice speed does not change source difficulty');
+  $('preview').checked = true;
+  $('preview').dispatchEvent(new Event('change'));
+  $('open-style').click();
+  check($('library-difficulty').querySelector('h3').textContent.includes('Medium'), 'Choose your style shows current style difficulty');
+  const details = [...$('library-difficulty').querySelectorAll('details')];
+  check(details.length === 3 && details[1].textContent.includes('Chord: Medium') &&
+    details[1].querySelectorAll('.difficulty-track').length === 2, 'Chooser breaks down sections, grouped parts and playable tracks');
+  const files = new DataTransfer();
+  files.items.add(new File([masteryLoadingMidi], 'DifficultyFile.mid'));
+  files.items.add(new File([new Uint8Array([0])], 'InvalidDifficulty.mid'));
+  $('style-folder-files').files = files.files;
+  $('style-folder-files').dispatchEvent(new Event('change'));
+  await until(() => [...$('library-style').options].some(option =>
+    option.dataset.styleName === 'DifficultyFile' && option.textContent.includes('Easy')));
+  await until(() => [...$('library-style').options].some(option =>
+    option.dataset.styleName === 'InvalidDifficulty' && option.textContent.includes('Difficulty unavailable')));
+  check($('style-name').textContent === 'Difficulty UI' && $('stop').getAttribute('aria-pressed') === 'true', 'Library rating does not replace the style or start playback');
+  const option = [...$('library-style').options].find(option => option.dataset.styleName === 'DifficultyFile');
+  change('library-style', option.value);
+  await until(() => $('library-difficulty').querySelector('h3')?.textContent.includes('DifficultyFile'));
+  check($('library-difficulty').textContent.includes('BPM'), 'Selecting a local file exposes track explanations');
+  check(!$('style-excluded').hidden && $('style-excluded-list').textContent.includes('InvalidDifficulty') &&
+    ![...$('style-results').children].some(row => row.textContent.includes('InvalidDifficulty')),
+  'Broken sources are excluded from playable results with explicit error details');
+  $('style-dialog').close();
+  return checks;
+}
+
 export async function verifyStyleFolderUI() {
   const $ = id => document.getElementById(id);
   const until = async predicate => {
@@ -517,7 +891,7 @@ export async function verifyStyleFolderUI() {
     await until(() => $('folder-status').textContent.includes('1 styles'));
     const stored = await readStyleFolder();
     check(await stored.isSameEntry(folder), 'Folder handle survives IndexedDB structured cloning');
-    const option = [...$('library-style').options].find(option => option.textContent === 'FolderTest');
+    const option = [...$('library-style').options].find(option => option.dataset.styleName === 'FolderTest');
     check(option?.parentElement.label === 'Folder · Pop', 'Folder entries appear grouped by subfolder');
     const before = $('style-name').textContent;
     $('library-style').value = option.value;
@@ -531,7 +905,7 @@ export async function verifyStyleFolderUI() {
     await until(() => $('folder-status').textContent.includes('Folder forgotten'));
     check(!await readStyleFolder(), 'Forget removes the persisted handle');
     check($('style-name').textContent === 'FolderTest', 'Forget preserves the loaded exercise');
-    check(![...$('library-style').options].some(option => option.textContent === 'FolderTest'), 'Forget removes folder library entries');
+    check(![...$('library-style').options].some(option => option.dataset.styleName === 'FolderTest'), 'Forget removes folder library entries');
     check(await pop.getFileHandle('FolderTest.mid'), 'Forget does not delete local files');
     window.showDirectoryPicker = async () => { throw new DOMException('Cancelled', 'AbortError'); };
     $('open-style-folder').click();
@@ -543,7 +917,7 @@ export async function verifyStyleFolderUI() {
     try {
       $('open-style-folder').click();
       await until(() => $('folder-status').textContent.includes('could not be remembered'));
-      check([...$('library-style').options].some(option => option.textContent === 'FolderTest'), 'Storage failure leaves the folder browsable for this session');
+      check([...$('library-style').options].some(option => option.dataset.styleName === 'FolderTest'), 'Storage failure leaves the folder browsable for this session');
       check($('notice').getAttribute('role') === 'alert', 'Storage failure is explicitly reported');
     } finally { indexedDB.open = open; }
     $('forget-style-folder').click();
@@ -554,7 +928,7 @@ export async function verifyStyleFolderUI() {
     $('style-folder-files').files = files.files;
     $('style-folder-files').dispatchEvent(new Event('change'));
     await until(() => $('folder-status').textContent.includes('session only'));
-    check([...$('library-style').options].some(option => option.textContent === 'FolderTest'), 'Session-only folder fallback populates the same library');
+    check([...$('library-style').options].some(option => option.dataset.styleName === 'FolderTest'), 'Session-only folder fallback populates the same library');
     check(!await readStyleFolder(), 'Session-only fallback does not claim to persist files');
     $('style-dialog').close();
     return checks;
@@ -881,7 +1255,12 @@ export async function verifyUI() {
   check($('mastery-styles-list').querySelector('.mastery-style-item'), 'Current style appears in the mastery hierarchy');
   check($('mastery-styles-list').querySelector('.mastery-section-item'), 'Playable sections appear beneath the current style');
   check($('mastery-styles-list').querySelector('.mastery-track'), 'Playable instruments appear beneath sections');
-  check($('mastery-styles-list').textContent.includes('Bass') && $('mastery-styles-list').textContent.includes('Drums'), 'Family mastery indicators are visible');
+  const returnToPractice = $('mastery-styles-list').querySelector('.mastery-style-item[open] .mastery-load-style');
+  check(returnToPractice?.textContent === 'Return to practice' && !returnToPractice.disabled, 'Current style offers a stopped, non-resetting return to practice');
+  const partLabels = [...$('mastery-styles-list').querySelectorAll('.mastery-style-item[open] .mastery-family-row .mastery-pill')]
+    .map(pill => pill.textContent);
+  check(partLabels.length === 5 && ['Rhythm', 'Bass', 'Chord', 'Pad', 'Phrase'].every(label =>
+    partLabels.some(text => text.includes(label))), 'All five Yamaha style-part mastery indicators are visible');
   if (innerWidth >= 900) check($('mastery-dialog').getBoundingClientRect().width >= 700, 'Mastery uses a dedicated wide surface');
   $('mastery-tab-trophies').click();
   check($('mastery-tab-trophies').getAttribute('aria-selected') === 'true' && !$('mastery-panel-trophies').hidden, 'Trophy Case tab switches panels');
@@ -931,4 +1310,84 @@ export async function verifyUI() {
     check(score.top + 180 < document.querySelector('.transport-shell').getBoundingClientRect().top, 'First notation row fits above transport');
   }
   return results;
+}
+
+export async function verifyDrumLevels() {
+  const style = createDemo();
+  const notes = [
+    [0, 36], [720, 36], [960, 36], [480, 37], [1440, 37],
+    ...Array.from({ length: 8 }, (_, index) => [index * 240, 42]),
+  ];
+  style.notes = notes.map(([tick, pitch]) => ({
+    tick, pitch, duration: 60, track: 9, channel: 9, program: 0, bank: 0, velocity: 90,
+  }));
+  style.sections = [{ name: 'Main A', start: 0, end: 1920 }];
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;width:1000px';
+  document.body.append(host);
+  try {
+    const notation = new Notation(host);
+    const counts = [];
+    for (let level = 1; level <= 4; level++) {
+      const exercise = buildExercise(style, { trackId: '9:9', bars: 4, level });
+      notation.render(exercise, 'C');
+      counts.push(exercise.target.length);
+      const hats = exercise.target.filter(note => note.pitch === 42);
+      if (level === 3 && hats.some(note => note.tick % 480 !== 0)) throw new Error('Level 3 contains offbeat hi-hats.');
+      if (level === 3 && hats.length !== 16) throw new Error('Level 3 must preserve all four on-beat hi-hats per bar.');
+      if (level === 4 && hats.length !== 32) throw new Error('Level 4 must restore all offbeat hi-hats.');
+      if (!host.querySelector('svg')) throw new Error('Drum level failed to render.');
+    }
+    return { counts, checks: ['All drum levels render', 'Level 3 keeps only pulse hats', 'Level 4 restores the full source pattern'] };
+  } finally { host.remove(); }
+}
+
+export async function verifyDrumNotation() {
+  const checks = [];
+  const check = (condition, message) => {
+    if (!condition) throw new Error(`Drum notation: ${message}`);
+    checks.push(message);
+  };
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;top:0;width:1000px';
+  document.body.append(host);
+  try {
+    const pitches = Object.keys(DRUM_NOTATION).map(Number);
+    pitches.push(87);
+    const style = createDemo();
+    style.notes = pitches.map((pitch, index) => ({
+      pitch, tick: index * 240, duration: 200, track: 9, channel: 9,
+      program: 0, bank: 0, velocity: 90, trackName: '',
+    }));
+    style.sections = [{ name: 'Drum map', start: 0, end: Math.ceil(pitches.length / 8) * 1920 }];
+    const played = [];
+    const notation = new Notation(host);
+    notation.onAudition = source => played.push(source.pitch);
+    const exercise = buildExercise(style, { bars: 8, level: 4, trackId: '9:9' });
+    const original = structuredClone(exercise);
+    notation.render(exercise, 'C');
+    check(host.querySelectorAll('.drum-key-item').length === pitches.length, 'Visual key covers every used GM/kit-specific drum');
+    check(host.querySelector('.drum-key').textContent.includes('Side stick / cross-stick') &&
+      host.querySelector('.drum-key').textContent.includes('Unmapped percussion'), 'Legend explicitly names cross-stick and unmapped sounds');
+    const heads = [...host.querySelectorAll('.vf-notehead[role="button"]')];
+    for (const pitch of pitches) {
+      const head = heads.find(head => head.getAttribute('aria-label').endsWith(`MIDI note ${pitch}`));
+      check(Boolean(head), `MIDI ${pitch} has an accessible, named notehead`);
+      head.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      check(played.at(-1) === pitch, `Audition preserves MIDI ${pitch}`);
+    }
+
+    const entry = notation.feedbackEntries.find(entry => entry.pitches.includes(37));
+    check(entry.note.getKeys()[entry.pitches.indexOf(37)] === 'c/5/x2', 'Rendered side stick uses an X on the snare space');
+    const snare = notation.feedbackEntries.find(entry => entry.pitches.includes(38));
+    check(snare.note.getKeys()[snare.pitches.indexOf(38)] === 'c/5', 'Rendered acoustic snare retains an oval');
+    notation.feedback(37, entry.sources[0].tick, true, .5);
+    check(entry.note.getSVGElement().querySelector('.vf-notehead').getAttribute('data-timing') === 'close', 'New cross-stick head retains close timing feedback');
+    notation.clearFeedback();
+    notation.feedback(53, 0, false);
+    check(notation.feedbackMarks.length === 1, 'Unexpected drum feedback renders the mapped ride bell');
+    check(JSON.stringify(exercise) === JSON.stringify(original), 'Drum mapping never changes exercise pitches, timing or scoring data');
+    check(drumNotation(44).key === 'd/4/x2', 'Pedal hi-hat uses an X below the staff');
+    return checks;
+  } finally { host.remove(); }
 }

@@ -385,10 +385,10 @@ test('hi-hat articulations have distinct heads and preserve controller pitches',
   const definition = notationStaves(exercise.target)[0];
   const { entries } = buildNotationVoice(exercise, definition, 0, 'C');
   assert.deepEqual(entries.map(entry => entry.note.getKeys()), [
-    ['g/5/x2'], ['d/4/d2'], ['g/5/x3'], ['c/5'],
+    ['g/5/x2'], ['d/4/x2'], ['g/5/x3'], ['c/5'],
   ]);
   assert.deepEqual(entries.slice(0, 3).map(entry => entry.note.getKeyProps()[0].code), [
-    'noteheadXBlack', 'noteheadDiamondBlack', 'noteheadCircleX',
+    'noteheadXBlack', 'noteheadXBlack', 'noteheadCircleX',
   ]);
   assert.deepEqual(entries.map(entry => entry.pitches), [[42], [44], [46], [38]]);
   assert.deepEqual(exercise, before);
@@ -398,7 +398,7 @@ test('simultaneous hi-hats retain separate heads and source mappings', () => {
   exercise.target.forEach(note => { note.part = 'drums'; });
   const definition = notationStaves(exercise.target)[0];
   const { entries } = prepareNotationBars(exercise, [definition], 'C')[0].parts[0];
-  assert.deepEqual(entries[0].note.getKeys(), ['g/5/x2', 'd/4/d2', 'g/5/x3']);
+  assert.deepEqual(entries[0].note.getKeys(), ['g/5/x2', 'd/4/x2', 'g/5/x3']);
   assert.deepEqual(entries[0].pitches, [42, 44, 46]);
   assert.deepEqual(entries[0].sources, exercise.target);
 });
@@ -613,7 +613,7 @@ test('each focus has the specified density ladder and no unwanted backing part',
     }
   }
 });
-test('drum levels keep every kick then every snare then hats, regardless of beat', () => {
+test('drum levels preserve kicks and snares, add pulse hats, then offbeat hats and percussion', () => {
   const style = createDemo();
   style.notes = [
     [0, 36], [240, 35], [480, 36], [720, 38], [960, 40],
@@ -624,7 +624,7 @@ test('drum levels keep every kick then every snare then hats, regardless of beat
   const snare = buildExercise(style, { focus: 'drums', level: 2, bars: 1 });
   assert.deepEqual(snare.target.map(n => n.pitch), [36, 35, 36, 38, 40]);
   assert.deepEqual(buildExercise(style, { focus: 'drums', level: 3, bars: 1 }).target.map(n => n.pitch),
-    [36, 35, 36, 38, 40, 42, 44, 46]);
+    [36, 35, 36, 38, 40, 44]);
   assert.equal(buildExercise(style, { focus: 'drums', level: 4, bars: 1 }).target.length, style.notes.length);
 });
 test('Yamaha kick and snare variants retain assigned pitches, kits and velocities at every layer', () => {
@@ -634,13 +634,46 @@ test('Yamaha kick and snare variants retain assigned pitches, kits and velocitie
   }));
   const expected = [
     [33, 35, 36], [33, 35, 36, 31, 37, 38, 40],
-    [33, 35, 36, 31, 37, 38, 40, 42, 44, 46], style.notes.map(note => note.pitch),
+    [33, 35, 36, 31, 37, 38, 40, 44], style.notes.map(note => note.pitch),
   ];
   for (let level = 1; level <= 4; level++) {
     const exercise = buildExercise(style, { trackId: '9:9', bars: 1, level });
     assert.deepEqual(exercise.target.map(note => note.pitch), expected[level - 1]);
     assert.deepEqual(exercise.target.map(({ part, isTarget, ...note }) => note),
       style.notes.filter(note => expected[level - 1].includes(note.pitch)));
+  }
+});
+
+test('drum layers do not remove complete patterns or invent notes to meet quotas', () => {
+  const style = createDemo();
+  style.notes = [0, 240, 480, 720].map(tick => ({
+    tick, pitch: 36, duration: 55, channel: 9, track: 9, program: 0, bank: 0, velocity: 90,
+  }));
+  for (let level = 1; level <= 4; level++) {
+    const exercise = buildExercise(style, { trackId: '9:9', bars: 1, level });
+    assert.equal(exercise.target.length, 4);
+    assert.deepEqual(exercise.target.map(note => note.tick), [0, 240, 480, 720]);
+  }
+  style.notes.forEach(note => { note.pitch = 49; });
+  for (let level = 1; level <= 3; level++) {
+    assert.equal(buildExercise(style, { trackId: '9:9', bars: 1, level }).target.length, 0);
+  }
+  assert.equal(buildExercise(style, { trackId: '9:9', bars: 1, level: 4 }).target.length, 4);
+});
+
+test('compound-meter drum hats follow dotted-quarter pulses, with tolerant humanized beats', () => {
+  for (const numerator of [6, 9, 12]) {
+    const style = createDemo();
+    style.meters = [{ tick: 0, numerator, denominator: 8 }];
+    style.notes = Array.from({ length: numerator }, (_, index) => ({
+      tick: index * 240 + (index % 3 === 0 ? 12 : 0), pitch: 42, duration: 60,
+      channel: 9, track: 9, program: 0, bank: 0, velocity: 90,
+    }));
+    const third = buildExercise(style, { trackId: '9:9', bars: 1, level: 3 });
+    assert.deepEqual(third.target.map(note => note.tick),
+      style.notes.filter((_, index) => index % 3 === 0).map(note => note.tick));
+    assert.equal(buildExercise(style, { focus: 'full', bars: 1, level: 3 }).target.length, numerator / 3);
+    assert.equal(buildExercise(style, { trackId: '9:9', bars: 1, level: 4 }).target.length, numerator);
   }
 });
 test('chord layers select source roots then other on-beat notes without generating fifths or triads', () => {

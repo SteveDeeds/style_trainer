@@ -113,12 +113,16 @@ export class AudioEngine {
     const file = choices[Math.floor(Math.random() * choices.length)];
     this.stopEncouragement();
     const source = this.context.createBufferSource();
+    const gain = this.context.createGain();
+    gain.gain.value = .4;
     source.buffer = this.encouragementBuffers.get(file);
-    source.connect(this.gain);
+    source.connect(gain);
+    gain.connect(this.gain);
     this.celebrationVoices.add(source);
     source.onended = () => {
       this.celebrationVoices.delete(source);
       source.disconnect();
+      gain.disconnect();
     };
     source.start();
     this.lastEncouragement.set(kind, file);

@@ -1,15 +1,16 @@
 import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental, Annotation, Articulation, Dot, StaveConnector, StaveTie, Barline } from 'vexflow';
+import { drumNotation } from './drum-notation.js';
 
 const sharpNames = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
 const flatNames = ['c', 'db', 'd', 'eb', 'e', 'f', 'gb', 'g', 'ab', 'a', 'bb', 'b'];
-const drumKeys = { 33: 'f/4', 35: 'f/4', 36: 'f/4', 31: 'c/5', 37: 'c/5', 38: 'c/5', 40: 'c/5', 42: 'g/5/x2', 44: 'd/4/d2', 46: 'g/5/x3' };
-const hiHats = {
-  42: { name: 'Closed hi-hat', symbol: 'X' },
-  44: { name: 'Pedal hi-hat', symbol: 'diamond below staff' },
-  46: { name: 'Open hi-hat', symbol: 'circled X' },
-};
 
 export const writtenPitch = note => note.pitch + (note.part === 'bass' ? 12 : 0);
+
+function addDrumLabels(note, pitches) {
+  const labels = [...new Set(pitches.map(pitch => drumNotation(pitch).label).filter(Boolean))];
+  if (labels.length) note.addModifier(new Annotation(labels.join(' / '))
+    .setVerticalJustification(Annotation.VerticalJustify.TOP), 0);
+}
 
 export function notationStaves(notes) {
   const staves = [];
@@ -117,9 +118,10 @@ export function buildNotationVoice(exercise, definition, bar, key, showChord = f
     const group = event.sources;
     const pitches = [...new Set(group.map(writtenPitch))].sort((a, b) => a - b);
     const duration = event.duration + (group.length ? '' : 'r');
-    const keys = pitches.length ? pitches.map(pitch => clef === 'percussion' ? (drumKeys[pitch] ?? 'e/5') :
+    const keys = pitches.length ? pitches.map(pitch => clef === 'percussion' ? drumNotation(pitch).key :
       `${(flat ? flatNames : sharpNames)[pitch % 12]}/${Math.floor(pitch / 12) - 1}`) : [clef === 'bass' ? 'd/3' : 'b/4'];
     const note = new StaveNote({ keys, duration, dots: event.dots ?? 0, clef: clef === 'percussion' ? 'treble' : clef });
+    if (clef === 'percussion' && pitches.length) addDrumLabels(note, pitches);
     if (event.dots) Dot.buildAndAttach([note], { all: true });
     if (event.unit === 0 && showChord && exercise.chords[bar]) {
       note.addModifier(new Annotation(exercise.chords[bar]).setVerticalJustification(Annotation.VerticalJustify.TOP), 0);
@@ -262,8 +264,8 @@ export class Notation {
         head.style.cursor = 'pointer';
         head.setAttribute('role', 'button');
         head.setAttribute('tabindex', '0');
-        const label = source.part === 'drums' && hiHats[source.pitch] ?
-          `${hiHats[source.pitch].name}, MIDI note ${source.pitch}` : `MIDI note ${source.pitch}`;
+        const label = source.part === 'drums' ?
+          `${drumNotation(source.pitch).name}, MIDI note ${source.pitch}` : `MIDI note ${source.pitch}`;
         head.setAttribute('aria-label', `Play ${label}`);
         const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
         title.textContent = label;
@@ -286,13 +288,40 @@ export class Notation {
     this.cursor.style.pointerEvents = 'none';
     svg.append(this.cursor);
     this.update(0);
-    if (exercise.target.some(source => source.part === 'drums' && hiHats[source.pitch])) {
-      const legend = document.createElement('p');
-      legend.className = 'metric-sub';
-      legend.textContent = `Hi-hats: ${Object.entries(hiHats).map(([pitch, hat]) =>
-        `${hat.symbol} = ${hat.name.toLowerCase()} (MIDI ${pitch})`).join('; ')}.`;
-      this.element.append(legend);
+    const drumPitches = [...new Set(exercise.target.filter(source => source.part === 'drums').map(source => source.pitch))].sort((a, b) => a - b);
+    if (drumPitches.length) this.renderDrumKey(drumPitches);
+  }
+  renderDrumKey(pitches) {
+    const legend = document.createElement('details');
+    legend.className = 'drum-key';
+    legend.open = pitches.length <= 12;
+    const summary = document.createElement('summary');
+    summary.textContent = 'Drum notation key';
+    const explanation = document.createElement('p');
+    explanation.textContent = 'Drums use oval heads; cymbals and cross-stick use X heads. Cross-stick shares the snare space. Open hi-hat uses a circled X; pedal hi-hat is below the staff. Extra percussion is explicitly labeled. Positions vary between publishers; this is the key for this exercise.';
+    const items = document.createElement('div');
+    items.className = 'drum-key-items';
+    for (const pitch of pitches) {
+      const descriptor = drumNotation(pitch);
+      const item = document.createElement('div');
+      item.className = 'drum-key-item';
+      const drawing = document.createElement('div');
+      const renderer = new Renderer(drawing, Renderer.Backends.SVG);
+      renderer.resize(110, 110);
+      const context = renderer.getContext();
+      const stave = new Stave(0, 35, 105).addClef('percussion').setContext(context).draw();
+      const note = new StaveNote({ keys: [descriptor.key], duration: 'q', clef: 'treble' });
+      const voice = new Voice({ num_beats: 1, beat_value: 4 }).addTickables([note]);
+      new Formatter().joinVoices([voice]).format([voice], 40);
+      voice.draw(context, stave);
+      drawing.querySelector('svg').setAttribute('aria-hidden', 'true');
+      const label = document.createElement('span');
+      label.textContent = `${descriptor.name} · ${descriptor.symbol} · MIDI ${pitch}`;
+      item.append(drawing, label);
+      items.append(item);
     }
+    legend.append(summary, explanation, items);
+    this.element.append(legend);
   }
   clearFeedback() {
     for (const entry of this.feedbackEntries ?? []) {
@@ -334,8 +363,9 @@ export class Notation {
     const written = writtenPitch(source);
     const flat = /b|^F$|^Dm$|^Gm$|^Cm$|^Fm$/.test(this.key);
     const name = (flat ? flatNames : sharpNames)[written % 12];
-    const key = definition.clef === 'percussion' ? drumKeys[pitch] ?? 'e/5' : `${name}/${Math.floor(written / 12) - 1}`;
+    const key = definition.clef === 'percussion' ? drumNotation(pitch).key : `${name}/${Math.floor(written / 12) - 1}`;
     const note = new StaveNote({ keys: [key], duration: '8', clef: definition.clef === 'percussion' ? 'treble' : definition.clef });
+    if (definition.clef === 'percussion') addDrumLabels(note, [pitch]);
     note.setStave(position.staves[staffIndex]);
     if (definition.clef !== 'percussion' && name.length > 1) note.addModifier(new Accidental(name.slice(1)), 0);
     const fraction = Math.max(0, Math.min(1, (tick - bar * this.exercise.barTicks) / this.exercise.barTicks));
